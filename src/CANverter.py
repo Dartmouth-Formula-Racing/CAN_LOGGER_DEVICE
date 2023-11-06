@@ -19,7 +19,7 @@ def validate_decode():
 arb_id_list = []
 signalList = ['Time']
 displaySignalList = ['Time']
-signalUnit = ['s']
+signalUnit = ['ms']
 signalMin = [None]
 signalMax = [None]
 values_list = []
@@ -36,9 +36,9 @@ outputlinecount = 2
 
 Tk().withdraw() # we don't want a full GUI, so keep the root window from appearing
 
-logfilename = "SocketCANData.log"#askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
-dbcfilename = "test.dbc"#askopenfilename(title = "Select DBC File",filetypes = (("DBC Files","*.dbc"),("all files","*.*"))) 
-outputfile = "DecodedData.csv"#asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
+logfilename = "../data/VDMSocketCANLog.log"#askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
+dbcfilename = "../dbc/test.dbc"#askopenfilename(title = "Select DBC File",filetypes = (("DBC Files","*.dbc"),("all files","*.*"))) 
+outputfile = "../data/VDMDecodedData.csv"#asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
 tempfile = outputfile + ".temp"
 
 with open (logfilename, "r",encoding="utf8") as inputfile:

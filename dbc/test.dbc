@@ -60,6 +60,11 @@ BO_ 165 Motor_Position_Info: 8 Vector__XXX
 	SG_ Electrical_Output_Freq : 32|16@1- (0.1,0) [-3276.8|3276.7] "Hz" Vector__XXX
 	SG_ Delta_Resolver_Filtered : 48|16@1- (0.1,0) [-359.9|359.9] "degrees" Vector__XXX
 
+BO_ 2148139011 Accelerometer: 6 Vector__XXX	
+	SG_ X_Axis_Acceleration : 7|16@0- (0.000244141,0) [-8|8] "g" Vector__XXX
+	SG_ Y_Axis_Acceleration : 23|16@0- (0.000244141,0) [-8|8] "g" Vector__XXX
+	SG_ Z_Axis_Acceleration : 39|16@0- (0.000244141,0) [-8|8] "g" Vector__XXX
+
 BA_DEF_ SG_  "SPN" INT 0 524287;
 BA_DEF_ BO_  "VFrameFormat" ENUM  "StandardCAN","ExtendedCAN","reserved","J1939PG";
 BA_DEF_  "DatabaseVersion" STRING ;
