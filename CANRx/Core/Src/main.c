@@ -63,6 +63,10 @@ static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
+#define ENCODED_CAN_SIZE_BYTES 40
+#define CAN_MESSAGES_TO_BUFFER 100
+#define MAX_BUFFER_EMPTYINGS 5000
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -70,11 +74,18 @@ static void MX_USART3_UART_Init(void);
 FRESULT res; /* FatFs function common result code */
 int timestamp = 0;
 int received = 0;
-uint8_t encodedData[100] = "";
+char* encodedData[ENCODED_CAN_SIZE_BYTES];
 int messageReceived = 0;
 uint32_t byteswritten; /* File write/read counts */
 CAN_RxHeaderTypeDef RxHeader;
 uint8_t rcvd_msg[8];
+
+
+char double_buffer[2][ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER+1];
+uint8_t double_buffer_fill_level[2];
+uint8_t filling_buffer;
+uint8_t buffer_emptyings = 0;
+uint8_t buffer_filled = 0;
 
 /* USER CODE END 0 */
 
@@ -123,6 +134,7 @@ int main(void) {
 
 	MX_CAN1_Init();
 
+
 	/* USER CODE BEGIN 2 */
 	HAL_CAN_Start(&hcan1);
 	CAN_Filter_Config();
@@ -135,34 +147,39 @@ int main(void) {
 
 	/* Infinite loop */
 	/* USER CODE BEGIN WHILE */
-	while (received < 1000) {
-		if (messageReceived) {
-			uint16_t data1 = (rcvd_msg[0] << 8) + rcvd_msg[1];
-			uint16_t data2 = (rcvd_msg[2] << 8) + rcvd_msg[3];
-			uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
-			uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
+	double_buffer[0][0] = '\00';
+	double_buffer[1][0] = '\00';
+	double_buffer_fill_level[0] = 0;
+	double_buffer_fill_level[1] = 0;
+	filling_buffer = 0;
 
-			snprintf(encodedData, 32, "(%d.0) X %08X#%04X%04X%04X%04X",
-					HAL_GetTick(), RxHeader.ExtId, data1, data2, data3, data4);
+	while (buffer_emptyings < MAX_BUFFER_EMPTYINGS) {
+		while (!buffer_filled);
 
-			res = f_write(&SDFile, encodedData, strlen((char*) encodedData),
-					(void*) &byteswritten);
-			if ((byteswritten == 0) || (res != FR_OK)) {
-				printf("\r\nWriting Failed!\r\n");
-				Error_Handler();
-			}
-			messageReceived = 0;
+		res = f_write(&SDFile, double_buffer[!filling_buffer],
+				ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER,
+				(void*) &byteswritten);
+
+		if ((byteswritten == 0) || (res != FR_OK)) {
+			printf("\r\nWriting Failed!\r\n");
+			Error_Handler();
 		}
+
+		buffer_emptyings++;
+		double_buffer[!filling_buffer][0] = '\00';
+		double_buffer_fill_level[!filling_buffer] = 0;
+		buffer_filled = 0;
 	}
 	/* USER CODE END WHILE */
 
 	/* USER CODE BEGIN 3 */
-	printf("1000 Messages received!");
+	printf("%d Messages received!", MAX_BUFFER_EMPTYINGS * CAN_MESSAGES_TO_BUFFER);
 	printf("\r\nUnmounting!\r\n");
 	f_close(&SDFile);
 	f_mount(&SDFatFS, (TCHAR const*) NULL, 0);
 	/* USER CODE END 3 */
 }
+
 
 /**
  * @brief System Clock Configuration
@@ -382,6 +399,22 @@ static void MX_GPIO_Init(void) {
 }
 
 /* USER CODE BEGIN 4 */
+void Get_and_Append_CAN_Message_to_Buffer() {
+	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) Error_Handler();
+
+	uint16_t data1 = (rcvd_msg[0] << 8) + rcvd_msg[1];
+	uint16_t data2 = (rcvd_msg[2] << 8) + rcvd_msg[3];
+	uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
+	uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
+
+	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES+1, "(%d.0) X %08X#%04X%04X%04X%04X\n",
+			HAL_GetTick(), RxHeader.ExtId, data1, data2, data3, data4);
+
+	strcat(double_buffer[filling_buffer], encodedData);
+	double_buffer_fill_level[filling_buffer]++;
+}
+
+
 void CAN_Filter_Config(void) {
 	CAN_FilterTypeDef filter;
 
@@ -411,12 +444,14 @@ void CAN_Filter_Config(void) {
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	received += 1;
-	messageReceived = 1;
+	if (double_buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER &&
+			double_buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER) Error_Handler();
 
-	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
-			!= HAL_OK) {
-		Error_Handler();
+	Get_and_Append_CAN_Message_to_Buffer();
+
+	if (double_buffer_fill_level[filling_buffer] == CAN_MESSAGES_TO_BUFFER) {
+		buffer_filled = 1;
+		filling_buffer = !filling_buffer;
 	}
 }
 
@@ -443,6 +478,7 @@ void Error_Handler(void) {
 	/* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
+	printf("\r\nError Handler Reached\r\n");
 	while (1) {
 	}
 	/* USER CODE END Error_Handler_Debug */
