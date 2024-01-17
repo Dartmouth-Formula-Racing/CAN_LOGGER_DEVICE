@@ -63,9 +63,9 @@ static void MX_USART3_UART_Init(void);
 /* USER CODE BEGIN PFP */
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 
-#define ENCODED_CAN_SIZE_BYTES 40
-#define CAN_MESSAGES_TO_BUFFER 100
-#define MAX_BUFFER_EMPTYINGS 5000
+#define ENCODED_CAN_SIZE_BYTES 32
+#define CAN_MESSAGES_TO_BUFFER 128
+#define MAX_BUFFER_EMPTYINGS 128
 
 /* USER CODE END PFP */
 
@@ -84,9 +84,9 @@ uint8_t rcvd_msg[8];
 char double_buffer[2][ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER+1];
 uint8_t double_buffer_fill_level[2];
 uint8_t filling_buffer;
-uint8_t buffer_emptyings = 0;
+uint32_t buffer_emptyings = 0;
 uint8_t buffer_filled = 0;
-
+uint32_t total_size = 0;
 /* USER CODE END 0 */
 
 /**
@@ -139,9 +139,6 @@ int main(void) {
 	HAL_CAN_Start(&hcan1);
 	CAN_Filter_Config();
 
-	printf("\r\nStart up succeeded!\r\n");
-
-//	f_mount(&SDFatFS, (TCHAR const*) NULL, 0);
 
 	/* USER CODE END 2 */
 
@@ -156,9 +153,7 @@ int main(void) {
 	while (buffer_emptyings < MAX_BUFFER_EMPTYINGS) {
 		while (!buffer_filled);
 
-		res = f_write(&SDFile, double_buffer[!filling_buffer],
-				ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER,
-				(void*) &byteswritten);
+		res = f_write(&SDFile, double_buffer[!filling_buffer], ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER, (void*) &byteswritten);
 
 		if ((byteswritten == 0) || (res != FR_OK)) {
 			printf("\r\nWriting Failed!\r\n");
@@ -166,6 +161,12 @@ int main(void) {
 		}
 
 		buffer_emptyings++;
+		printf("emptied buffer %d\n\r", !filling_buffer);
+		printf("buffers emptied: %d\n\r", buffer_emptyings);
+		printf("sizeof: %d\n\r", byteswritten);
+	    printf("buffer value: %x\n\r", double_buffer[!filling_buffer][ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER]);
+
+		total_size += byteswritten;
 		double_buffer[!filling_buffer][0] = '\00';
 		double_buffer_fill_level[!filling_buffer] = 0;
 		buffer_filled = 0;
@@ -174,6 +175,8 @@ int main(void) {
 
 	/* USER CODE BEGIN 3 */
 	printf("%d Messages received!", MAX_BUFFER_EMPTYINGS * CAN_MESSAGES_TO_BUFFER);
+	printf("total sizeof: %d\n\r", total_size);
+
 	printf("\r\nUnmounting!\r\n");
 	f_close(&SDFile);
 	f_mount(&SDFatFS, (TCHAR const*) NULL, 0);
@@ -410,7 +413,7 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES+1, "(%d.0) X %08X#%04X%04X%04X%04X\n",
 			HAL_GetTick(), RxHeader.ExtId, data1, data2, data3, data4);
 
-	strcat(double_buffer[filling_buffer], encodedData);
+	strcat(double_buffer[filling_buffer], "1234567890abcdefghijklmnopqrstu\n");//encodedData);
 	double_buffer_fill_level[filling_buffer]++;
 }
 
