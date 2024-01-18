@@ -8,6 +8,7 @@ from tkinter import Message, Tk
 from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import asksaveasfilename
 import time
+import pandas as pd 
 
 def validate_decode():
     try:
@@ -172,11 +173,25 @@ inputfile.close()
 
 with open(tempfile, "r") as inputfile:
     with open(outputfile, "w", newline='') as logfile:
-        reader = csv.reader(inputfile, delimiter = ',', quotechar = '"')
-        writer = csv.writer(logfile,quoting=csv.QUOTE_ALL, delimiter=",")
+        reader = csv.reader(inputfile, delimiter = ',')
+        writer = csv.writer(logfile, delimiter=",")
+        start_time = time.time()
+        data = []
         for row in tqdm(reader,desc = "Compressing", total = outputlinecount, unit = "Rows"):
             result = list(compress(row, signalactive_list))
-            writer.writerow(result)
+            #writer.writerow(result)
+            data.append(result)
+            data.append(result)
+            data.append(result)
+            data.append(result)
+            data.append(result)
+
+
+        df = pd.DataFrame(data[10:], columns =data[0], dtype = float) 
+
+        print("--- %s seconds ---" % (time.time() - start_time))
+        print(df)
+        df.to_pickle("../dataframe.pkl")
     logfile.close()
 inputfile.close()
 os.remove(tempfile)
