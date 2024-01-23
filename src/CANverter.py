@@ -8,6 +8,7 @@ from tkinter import Message, Tk
 from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import asksaveasfilename
 import time
+import pandas as pd
 
 def validate_decode():
     try:
@@ -36,9 +37,9 @@ outputlinecount = 2
 
 Tk().withdraw() # we don't want a full GUI, so keep the root window from appearing
 
-logfilename = "../data/VDMSocketCANLog.log"#askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
+logfilename = "../data/CAN.LOG"#askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
 dbcfilename = "../dbc/test.dbc"#askopenfilename(title = "Select DBC File",filetypes = (("DBC Files","*.dbc"),("all files","*.*"))) 
-outputfile = "../data/VDMDecodedData.csv"#asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
+outputfile = "../data/SDCardDecodedYaw.csv"#asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
 tempfile = outputfile + ".temp"
 
 with open (logfilename, "r",encoding="utf8") as inputfile:
@@ -105,7 +106,7 @@ with open (logfilename, "r",encoding="utf8") as inputfile:
             signalactive_list.append(False)
 
         writecsv2 = csv.writer(logfile, quoting=csv.QUOTE_ALL)
-        linePattern = re.compile(r"\((\d+.\d+)\)\s+[^\s]+\s+([0-9A-F#]{3}|[0-9A-F#]{8})#([0-9A-F]+)")
+        linePattern = re.compile(r"\((\d+)\)\s+[^\s]+\s+([0-9A-F#]{3}|[0-9A-F#]{8})#([0-9A-F]+)")
         for row in tqdm(inputfile,desc= "Lines", total = numlines,unit = " Lines"):
             try:
                 tokens = linePattern.search(row).groups()
@@ -172,11 +173,18 @@ inputfile.close()
 
 with open(tempfile, "r") as inputfile:
     with open(outputfile, "w", newline='') as logfile:
-        reader = csv.reader(inputfile, delimiter = ',', quotechar = '"')
-        writer = csv.writer(logfile,quoting=csv.QUOTE_ALL, delimiter=",")
+        reader = csv.reader(inputfile, delimiter = ',')
+        writer = csv.writer(logfile, delimiter=",")
+        start_time = time.time()
+        data = []
         for row in tqdm(reader,desc = "Compressing", total = outputlinecount, unit = "Rows"):
             result = list(compress(row, signalactive_list))
             writer.writerow(result)
+            data.append(result)
+        df = pd.DataFrame(data[2:], columns = data[0], dtype = float) 
+        print("--- %s seconds ---" % (time.time() - start_time))
+        print(df)
+        df.to_pickle("./dataframe.pkl")
     logfile.close()
 inputfile.close()
 os.remove(tempfile)

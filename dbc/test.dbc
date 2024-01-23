@@ -65,6 +65,11 @@ BO_ 2148139011 Accelerometer: 6 Vector__XXX
 	SG_ Y_Axis_Acceleration : 23|16@0- (0.000244141,0) [-8|8] "g" Vector__XXX
 	SG_ Z_Axis_Acceleration : 39|16@0- (0.000244141,0) [-8|8] "g" Vector__XXX
 
+BO_ 2148139012 Yaw_Rate: 6 Vector__XXX
+	SG_ X_Axis_YawRate : 7|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
+	SG_ Y_Axis_YawRate : 23|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
+	SG_ Z_Axis_YawRate : 39|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
+
 BA_DEF_ SG_  "SPN" INT 0 524287;
 BA_DEF_ BO_  "VFrameFormat" ENUM  "StandardCAN","ExtendedCAN","reserved","J1939PG";
 BA_DEF_  "DatabaseVersion" STRING ;

@@ -23,7 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "usbd_cdc.h"
+#include "usbd_cdc_if.h"
 
 /* USER CODE END Includes */
 
@@ -65,7 +65,7 @@ static void MX_USART3_UART_Init(void);
 static void CAN_Filter_Config(void);
 
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define ENCODED_CAN_SIZE_BYTES 32
+#define ENCODED_CAN_SIZE_BYTES 41
 #define CAN_MESSAGES_TO_BUFFER 128
 #define MAX_BUFFER_EMPTYINGS 128
 
@@ -158,7 +158,6 @@ int main(void)
 		while (!buffer_filled);
 
 
-
 		res = f_write(&SDFile, filling_buffer ? buffer1 : buffer2, ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER, (void*) &byteswritten);
 		CDC_Transmit_FS(filling_buffer ? buffer1 : buffer2, ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER);
 
@@ -169,8 +168,8 @@ int main(void)
 
 		buffer_emptyings++;
 		printf("emptied buffer %d\n\r", !filling_buffer);
-		printf("buffers emptied: %d\n\r", buffer_emptyings);
-		printf("sizeof: %d\n\r", byteswritten);
+		printf("buffers emptied: %ld\n\r", buffer_emptyings);
+		printf("sizeof: %ld\n\r", byteswritten);
 
 		total_size += byteswritten;
 		if (filling_buffer) {
@@ -186,7 +185,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	printf("%d Messages received!", MAX_BUFFER_EMPTYINGS * CAN_MESSAGES_TO_BUFFER);
-	printf("total sizeof: %d\n\r", total_size);
+	printf("total sizeof: %ld\n\r", total_size);
 
 	printf("\r\nUnmounting!\r\n");
 	f_close(&SDFile);
@@ -436,10 +435,10 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 	uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
 	uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
 
-	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES+1, "(%d.0) X %08X#%04X%04X%04X%04X\n",
+	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES+1, "(%010ld) X %08lX#%04X%04X%04X%04X\n",
 			HAL_GetTick(), RxHeader.ExtId, data1, data2, data3, data4);
 
-	strcat(filling_buffer ? buffer2 : buffer1, "1234567890abcdefghijklmnopqrstu\n");//encodedData);
+	strcat(filling_buffer ? buffer2 : buffer1, encodedData);
 	double_buffer_fill_level[filling_buffer]++;
 }
 
