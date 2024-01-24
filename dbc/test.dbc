@@ -70,6 +70,26 @@ BO_ 2148139012 Yaw_Rate: 6 Vector__XXX
 	SG_ Y_Axis_YawRate : 23|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
 	SG_ Z_Axis_YawRate : 39|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
 
+BO_ 2148139008 GPS_Position: 8 Vector__XXX
+	SG_ GPS_Latitude : 7|32@0- (0,0) [-180|180] "degrees" Vector__XXX
+	SG_ GPS_Longitude : 39|32@0- (0,0) [-180|180] "degrees" Vector__XXX
+
+BO_ 2148139009 GPS_Data: 8 Vector__XXX
+	SG_ GPS_Speed : 7|16@0+ (0.01,0) [0|655.35] "mph" Vector__XXX
+	SG_ GPS_Altitude : 23|16@0- (1,0) [-32768|32767] "ft" Vector__XXX
+	SG_ GPS_TrueCourse : 39|16@0+ (0.01,0) [0|655.35] "degrees" Vector__XXX
+	SG_ GPS_SatellitesInUse : 55|8@0+ (1,0) [0|255] "satellites" Vector__XXX
+	SG_ GPS_Valid : 63|8@0+ (1,0) [0|255] "OK(1)/N(2)" Vector__XXX
+
+BO_ 2148139010 GPS_DateTime: 8 Vector__XXX
+	SG_ GPS_Valid : 7|8@0+ (1,0) [0|255] "OK(1)/N(2)" Vector__XXX
+	SG_ UTC_Year : 15|8@0+ (1,0) [0|255] "year" Vector__XXX
+	SG_ UTC_Month : 23|8@0+ (1,0) [0|255] "month" Vector__XXX
+	SG_ UTC_Day : 31|8@0+ (1,0) [0|255] "day" Vector__XXX
+	SG_ UTC_Hour : 47|8@0+ (1,0) [0|255] "hour" Vector__XXX
+	SG_ UTC_Minute : 55|8@0+ (1,0) [0|255] "min" Vector__XXX
+	SG_ UTC_Second : 63|8@0+ (1,0) [0|255] "sec" Vector__XXX
+
 BA_DEF_ SG_  "SPN" INT 0 524287;
 BA_DEF_ BO_  "VFrameFormat" ENUM  "StandardCAN","ExtendedCAN","reserved","J1939PG";
 BA_DEF_  "DatabaseVersion" STRING ;
