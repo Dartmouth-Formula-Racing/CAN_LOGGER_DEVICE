@@ -1,190 +1,171 @@
 import cantools
-import os
-from itertools import compress
 from tqdm import tqdm
 import re
-import csv
-from tkinter import Message, Tk
+from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 from tkinter.filedialog import asksaveasfilename
-import time
 import pandas as pd
 
-def validate_decode():
-    try:
-        db.decode_message(arbitration_id, data)
-        return True
-    except:
-        return False
-
-arb_id_list = []
+#CONSTANTS
+SOCKET_CAN_LINE_PATTERN = re.compile(r"\((\d+)\)\s+[^\s]+\s+([0-9A-F#]{3}|[0-9A-F#]{8})#([0-9A-F]+)")
+DPS_BASE = 3
+LOGGING_BASE = 1
 signalList = ['Time']
 displaySignalList = ['Time']
-signalUnit = ['ms']
-signalMin = [None]
-signalMax = [None]
-values_list = []
-aggregated_values_list = []
-signalactive_list = []
-signals_bool = 0
-dps_list = [3]
-dpsbase = 3
-loggingbase = 1
-frequency = 100
-starttime = float(0)
-lastwritetime = float(0)
-outputlinecount = 2
+signalUnitList = ['ms']
+signalMinList = [None]
+signalMaxList = [None]
+dpsList = [3]
 
-Tk().withdraw() # we don't want a full GUI, so keep the root window from appearing
+def get_encoded_pattern(row : str):
+    #Get tokens
+    tokens = SOCKET_CAN_LINE_PATTERN.search(row).groups()
+    #return tokens in correct format
+    timestamp = int(tokens[0])
+    identifier = int(tokens[1],16)
+    dataPacket = bytearray.fromhex(tokens[2])
 
-logfilename = "../data/CAN.LOG"#askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
-dbcfilename = "../dbc/test.dbc"#askopenfilename(title = "Select DBC File",filetypes = (("DBC Files","*.dbc"),("all files","*.*"))) 
-outputfile = "../data/SDCardDecodedYaw.csv"#asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
-tempfile = outputfile + ".temp"
+    return (timestamp, identifier, dataPacket)
 
-with open (logfilename, "r",encoding="utf8") as inputfile:
-    print("Calculating Total Lines... \n")
-    numlines = sum(1 for line in inputfile)
-inputfile.close()
+def create_dbc_object(dbcFileName : str):
+    return cantools.database.load_file(dbcFileName)
 
-with open (logfilename, "r",encoding="utf8") as inputfile:
+def get_decoded_values(dbc, identifier, data, aggregatedValues, isStream):
+    
+    decodedMessage = dbc.decode_message(identifier, data, decode_choices=False)
+    for (signalName, signalValue) in decodedMessage.items():
+        if signalName in signalList:
+            signalIndex = signalList.index(signalName)
+            signalMin = signalMinList[signalIndex]
+            signalMax = signalMaxList[signalIndex]
+            
+            if  ((signalMin == None or signalValue > signalMin) and (signalMax == None or signalValue < signalMax)):
+                dps = dpsList[signalIndex]
+                if dps != None:
+                    try:
+                        signalValue = round(float(signalValue), dps)
+                        if int(signalValue) == float(signalValue):
+                            signalValue = int(signalValue)
+                    except:
+                        pass
+                if isStream:
+                    aggregatedValues[signalIndex] = signalValue
+                else:
+                    aggregatedValues[signalIndex].append(signalValue)
+                
+def get_identifier_list(dbc):
+    identifierList = []
 
-    with open(tempfile, "w", newline='') as logfile:
-        writecsv = csv.writer(logfile, quoting=csv.QUOTE_ALL, delimiter=",")
-        db = cantools.database.load_file(dbcfilename)
-        raw_dbc = db.messages
-        for iterable in raw_dbc:
-            listmsgs = str(iterable).split(',')
-            arb_id = int(listmsgs[1],0)
-            arb_id_list.append(arb_id)
-        arb_id_list.sort()
+    for dbcMessage in dbc.messages:
+        messageList = str(dbcMessage).split(',')
+        identifierList.append(int(messageList[1],0))
+    identifierList.sort()
 
-        for count,i in enumerate(arb_id_list):
-            frameID = db.get_message_by_frame_id(arb_id_list[count])
-            signalset = frameID.signals        
+    return identifierList
 
-            if len(signalset) > 0:
-                for i, iterable in enumerate(signalset):
-                    if frameID.signals[i].is_multiplexer == False:
-                        signalname    = str(frameID.signals[i].name)
-                        modsignalname = str(frameID.signals[i].name).replace("_"," ")
-                        signalunit    = frameID.signals[i].unit
-                        signalcomment = frameID.signals[i].comment
-                        signalminimum = frameID.signals[i].minimum
-                        signalmaximum = frameID.signals[i].maximum
-                        if signalcomment != None:
-                            try:
-                                log = int(re.findall("LOG = (d{1})",signalcomment)[0])
-                            except:
-                                log = loggingbase
-                        else:
-                            log = loggingbase
+def log_to_dataframe(dbc, logFileName : str):
+    
+
+    with open (logFileName, "r",encoding="utf8") as logFile:
+        numLines = len(logFile.readlines())
+    logFile.close()
+
+    with open (logFileName, "r",encoding="utf8") as logFile:
+        identifierList = get_identifier_list(dbc)
+
+        for identifier in identifierList:
+            frameID = dbc.get_message_by_frame_id(identifier)
+            signalSet = frameID.signals        
+
+            if len(signalSet) > 0:
+                for signal in signalSet:
+                    if signal.is_multiplexer == False:
+                        signalName    = str(signal.name)
+                        modSignalName = str(signal.name).replace("_"," ")
+                        signalUnit    = signal.unit
+                        signalComment = signal.comment
+                        signalMinimum = signal.minimum
+                        signalMaximum = signal.maximum
+                        log = LOGGING_BASE
+                        try:
+                            log = int(re.findall("LOG = (d{1})",signalComment)[0])
+                        except: 
+                            pass
+
                         if log >=1:
-                            signalList.append(signalname)
-                            displaySignalList.append(modsignalname)
-                            signalMin.append(signalminimum)
-                            signalMax.append(signalmaximum)
-                            if signalunit != None:
-                                signalUnit.append(signalunit)
+                            signalList.append(signalName)
+                            displaySignalList.append(modSignalName)
+                            signalMinList.append(signalMinimum)
+                            signalMaxList.append(signalMaximum)
+                            if signalUnit != None:
+                                signalUnitList.append("("+signalUnit+")")
                             else:
-                                signalUnit.append('')
-                            if signalcomment != None:
-                                try:
-                                    dps = int(re.findall("DPS = (\d{2}|\d{1})",signalcomment)[0])
-                                except:
-                                    dps = dpsbase
-                            else:
-                                dps = dpsbase
-                            dps_list.append(dps)
-
-        writecsv.writerow(displaySignalList)
-        writecsv.writerow(signalUnit)
-
-        for iterable in range(len(signalList)) :
-            values_list.append([])
-            aggregated_values_list.append('')
-            signalactive_list.append(False)
-
-        writecsv2 = csv.writer(logfile, quoting=csv.QUOTE_ALL)
-        linePattern = re.compile(r"\((\d+)\)\s+[^\s]+\s+([0-9A-F#]{3}|[0-9A-F#]{8})#([0-9A-F]+)")
-        for row in tqdm(inputfile,desc= "Lines", total = numlines,unit = " Lines"):
-            try:
-                tokens = linePattern.search(row).groups()
-                timestamp = float(tokens[0])
-                arbitration_id = int(tokens[1],16)
-                data = bytearray.fromhex(tokens[2])
-                if validate_decode() == True:
-                    signals_bool = 1
-                    if starttime == 0:
-                        starttime = timestamp
-                        lastwritetime = 0
-                        timestamp = 0
-                    else:
-                        timestamp = (timestamp - starttime)
-                    decoded_msg = db.decode_message(arbitration_id, data, decode_choices=False) 
-                    for (key, value) in decoded_msg.items():
-                        if key in signalList:
-                            indexval = signalList.index(key)
-                            if signalMin[indexval] == None or value > signalMin[indexval] and signalMax[indexval] == None or value < signalMax[indexval]:
-                                if dps_list[indexval] != None:
-                                    try:
-                                        value = round(float(value),dps_list[indexval])
-                                        try:
-                                            if int(value) == float(value):
-                                                value = int(value)
-                                        except:
-                                            pass
-                                    except:
-                                        pass
-                                values_list[indexval].append(value)
-                if ((timestamp == 0) or (timestamp - lastwritetime >= (1/frequency))) and (signals_bool == 1) :
-                    lastwritetime = timestamp
-                    for i, items in enumerate(values_list):
-                        if len(values_list[i]) > 0:
+                                signalUnitList.append('')
                             try:
-                                value = sum(values_list[i])/len(values_list[i])
+                                dps = int(re.findall("DPS = (\d{2}|\d{1})",signalComment)[0])
+                                dpsList(dps)
                             except:
-                                value = values_list[i][-1]
-                            if dps_list[i] != 'None':
+                                dpsList.append(DPS_BASE)
+
+        for i in range(len(signalList)) :
+            displaySignalList[i] += " " + signalUnitList[i]
+
+        valueRows = []
+        aggregatedValuesList = [''] * len(signalList)
+        valuesList = [ [] for _ in range(len(signalList)) ]
+        
+        (lastTimestamp, identifier, data) = get_encoded_pattern(logFile.readline())
+        get_decoded_values(dbc, identifier, data, valuesList, False)
+
+        for row in tqdm(logFile,desc= "Lines", total = numLines,unit = " Lines"):
+            try:
+                (timestamp, identifier, data) = get_encoded_pattern(row)
+
+                if (lastTimestamp != timestamp):
+                    for i, value in enumerate(valuesList):
+                        if len(value) > 0:
+                            try:
+                                averageValue = float(sum(value)/len(value))
+                            except:
+                                averageValue = float(value[-1])
+                            if dpsList[i] != 'None':
                                 try:
-                                    value = round(float(value),dps_list[i])
-                                    try:
-                                        if int(value) == float(value):
-                                            value = int(value)
-                                    except:
-                                        pass
+                                    averageValue = round(averageValue, dpsList[i])
+                                    if int(averageValue) == averageValue:
+                                        averageValue = int(averageValue)
                                 except:
                                     pass
-                            aggregated_values_list[i] = value
-                    aggregated_values_list[0] = str("%0.3f" %(lastwritetime))
-                    writecsv.writerow(aggregated_values_list)
-                    outputlinecount += 1
-                    signals_bool = 0
-            
-                    for i,items in enumerate(values_list):
-                        if aggregated_values_list[i] != "" and signalactive_list[i] == False:
-                            signalactive_list[i] = True
-                        values_list[i] = []
-                        aggregated_values_list[i] = ''
+                            aggregatedValuesList[i] = averageValue
+                    aggregatedValuesList[0] = str("%d" %(lastTimestamp))
+                    valueRows.append(aggregatedValuesList.copy())
+                    lastTimestamp = timestamp
+                    valuesList = [ [] for _ in range(len(signalList)) ]
+                    aggregatedValuesList = [''] * len(valuesList)
+
+                get_decoded_values(dbc, identifier, data, valuesList, False)
+                
             except:
                 print("invalidated line observed: '%s'"% (row[:-1]))
-    logfile.close()
-inputfile.close()
+    logFile.close()
+    return pd.DataFrame(valueRows, columns = displaySignalList, dtype = float)
 
-with open(tempfile, "r") as inputfile:
-    with open(outputfile, "w", newline='') as logfile:
-        reader = csv.reader(inputfile, delimiter = ',')
-        writer = csv.writer(logfile, delimiter=",")
-        start_time = time.time()
-        data = []
-        for row in tqdm(reader,desc = "Compressing", total = outputlinecount, unit = "Rows"):
-            result = list(compress(row, signalactive_list))
-            writer.writerow(result)
-            data.append(result)
-        df = pd.DataFrame(data[2:], columns = data[0], dtype = float) 
-        print("--- %s seconds ---" % (time.time() - start_time))
-        print(df)
-        df.to_pickle("./dataframe.pkl")
-    logfile.close()
-inputfile.close()
-os.remove(tempfile)
+
+def decode_message_stream(dbc, socketCANLine):
+    valuesList = [ 0 for _ in range(len(signalList)) ]
+    (timestamp, identifier, data) = get_encoded_pattern(socketCANLine)
+    get_decoded_values(dbc, identifier, data, valuesList, True)
+    valuesList[0] = timestamp
+    return pd.DataFrame([valuesList], columns = displaySignalList, dtype = float)
+
+if __name__ == "__main__":
+    Tk().withdraw() # we don't want a full GUI, so keep the root window from appearing
+
+    #askopenfilename(title = "Select Log File",filetypes = (("LOG Files","*.log"),("all files","*.*"))) 
+    #askopenfilename(title = "Select DBC File",filetypes = (("DBC Files","*.dbc"),("all files","*.*"))) 
+    #asksaveasfilename(title = "Save Exported CSV File", filetypes = (("CSV Files","*.csv"),("all files","*.*")))
+
+    dbc = create_dbc_object("/Users/nestoreo/ENGS89-90-CAN-Decoder/dbc/test.dbc")
+    df = log_to_dataframe(dbc, "/Users/nestoreo/ENGS89-90-CAN-Decoder/data/CAN_00012.log")
+    df.to_csv( "/Users/nestoreo/ENGS89-90-CAN-Decoder/data/SDCardDecodedAll.csv")
+    dfsingle = decode_message_stream(dbc, "(0000000331) X 000A0003#0302005010220000")
+    print(dfsingle)
