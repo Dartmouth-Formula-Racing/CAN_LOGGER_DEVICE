@@ -1,6 +1,7 @@
 import cantools
 import re
 import pandas as pd
+import numpy as np
 
 class CANverter():
     #CONSTANTS
@@ -97,7 +98,7 @@ class CANverter():
                 self.displaySignalList[i] += " " + self.signalUnitList[i]
 
             dataframeRows = [] #Dataframe rows
-            averagedValuesList = [''] * len(self.signalList) #Avg values if signal freq > 1000 Hz
+            averagedValuesList = [np.nan] * len(self.signalList) #Avg values if signal freq > 1000 Hz
             currentValuesList = [ [] for _ in range(len(self.signalList)) ] #Current decoded values list
             
             (lastTimestamp, identifier, data) = self.get_encoded_pattern(logFile.readline()) #Get first line
@@ -124,7 +125,7 @@ class CANverter():
                                 averagedValuesList[i] = averageValue
                         dataframeRows.append(averagedValuesList.copy()) #append to dataframe rows
                         currentValuesList = [ [] for _ in range(len(self.signalList)) ] #clear our data lists
-                        averagedValuesList = [''] * len(currentValuesList)
+                        averagedValuesList = [np.nan] * len(currentValuesList)
 
                     self.get_decoded_values(identifier, data, currentValuesList)
                 except:
@@ -136,7 +137,7 @@ class CANverter():
 
     def decode_message_stream(self, socketCANLine):
         (timestamp, identifier, data) = self.get_encoded_pattern(socketCANLine)
-        valuesList = [''] * len(self.signalList)
+        valuesList = [np.nan] * len(self.signalList)
         valuesList[0] = timestamp
 
         decodedMessage = self.dbc.decode_message(identifier, data, decode_choices=False)

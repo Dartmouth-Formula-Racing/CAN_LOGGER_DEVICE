@@ -71,8 +71,8 @@ BO_ 2148139012 Yaw_Rate: 6 Vector__XXX
 	SG_ Z_Axis_YawRate : 39|16@0- (0.015258789,0) [-500|500] "deg/s" Vector__XXX
 
 BO_ 2148139008 GPS_Position: 8 Vector__XXX
-	SG_ GPS_Latitude : 7|32@0- (0,0) [-180|180] "degrees" Vector__XXX
-	SG_ GPS_Longitude : 39|32@0- (0,0) [-180|180] "degrees" Vector__XXX
+	SG_ GPS_Latitude : 7|32@0- (1,0) [-180|180] "degrees" Vector__XXX
+	SG_ GPS_Longitude : 39|32@0- (1,0) [-180|180] "degrees" Vector__XXX
 
 BO_ 2148139009 GPS_Data: 8 Vector__XXX
 	SG_ GPS_Speed : 7|16@0+ (0.01,0) [0|655.35] "mph" Vector__XXX
@@ -89,6 +89,9 @@ BO_ 2148139010 GPS_DateTime: 8 Vector__XXX
 	SG_ UTC_Hour : 47|8@0+ (1,0) [0|255] "hour" Vector__XXX
 	SG_ UTC_Minute : 55|8@0+ (1,0) [0|255] "min" Vector__XXX
 	SG_ UTC_Second : 63|8@0+ (1,0) [0|255] "sec" Vector__XXX
+
+SIG_VALTYPE_ 2148139008 GPS_Latitude : 1;
+SIG_VALTYPE_ 2148139008 GPS_Longitude : 1;
 
 BA_DEF_ SG_  "SPN" INT 0 524287;
 BA_DEF_ BO_  "VFrameFormat" ENUM  "StandardCAN","ExtendedCAN","reserved","J1939PG";
