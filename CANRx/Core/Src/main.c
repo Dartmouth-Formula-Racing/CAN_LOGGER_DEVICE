@@ -24,7 +24,6 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,6 +66,7 @@ static HAL_StatusTypeDef CAN_Filter_Config(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 41
 #define CAN_MESSAGES_TO_BUFFER 128
+#define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
 
@@ -77,12 +77,10 @@ DIR dir;		//Directory
 FILINFO fno;	// File Info
 
 uint8_t POWER_STATE;
-
-char buffer1[ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER + 1];
-char buffer2[ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER + 1];
-uint8_t double_buffer_fill_level[2];
-uint8_t filling_buffer;
-uint8_t buffer_filled = 0;
+char data_buffer[2][BUFFER_TOTAL_SIZE + 1];
+uint8_t buffer_fill_level[2];
+uint8_t current_buffer;
+uint8_t is_buffer_filled = 0;
 /* USER CODE END 0 */
 
 /**
@@ -158,22 +156,24 @@ int main(void)
 			break;
 
 		case PERIPHERAL_INIT:
-			buffer1[0] = '\00';
-			buffer2[0] = '\00';
-			double_buffer_fill_level[0] = 0;
-			double_buffer_fill_level[1] = 0;
-			filling_buffer = 0;
+			data_buffer[0][0] = '\00';
+			data_buffer[1][0] = '\00';
+			buffer_fill_level[0] = 0;
+			buffer_fill_level[1] = 0;
+			current_buffer = 0;
 
 			printf("Initializing Peripherals...\r\n");
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
-					GPIO_PIN_RESET); //Red LED
+			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
 			//Initializing CAN
-			if (HAL_CAN_Start(&hcan1) != HAL_OK)
+			if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+				printf("CAN could not start.\r\n");
 				Error_Handler();
-			else if (CAN_Filter_Config() != HAL_OK)
+			}
+			if (CAN_Filter_Config() != HAL_OK) {
+				printf("CAN filter failed to set.\r\n");
 				Error_Handler();
-
+			}
 			printf("CAN initialization succeeded...\r\n");
 
 			//Mount and Format SD Card
@@ -185,17 +185,18 @@ int main(void)
 			printf("SD initialization succeeded...\r\n");
 
 			state = CREATE_LOG_FILE;
-
 			break;
+
 		case CREATE_LOG_FILE:
 			printf("Creating new log file...\r\n");
 
-			TCHAR filename[FILENAME_MAX_BYTES];
-
+			//Opening CAN_DATA directory
 			if (f_opendir(&dir, "/CAN_DATA") != FR_OK) {
-				printf("Failed to open root directory!\r\n");
+				printf("Failed to open /CAN_DATA directory!\r\n");
 				Error_Handler();
 			}
+
+			// Finding next filename
 			char last_file_number[5];
 			uint16_t max_file_number = 0;
 			do {
@@ -210,24 +211,30 @@ int main(void)
 					if (max_file_number < strtol(last_file_number, NULL, 10))
 						max_file_number = strtol(last_file_number, NULL, 10);
 
-					printf("File Name String: %s File Name Number: %d\n\r", last_file_number, max_file_number + 1);
 					printf("File found: %s\n\r", fno.fname); // Print File Name
 				}
 			} while (fno.fname[0] != 0);
 
-			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/CAN_%05d.log", max_file_number + 1);
-			printf("Exited while with file Name String: %s \n\r", filename);
+			//Closing CAN_DATA directory
+			if (f_closedir(&dir) != FR_OK) {
+				printf("Failed to close /CAN_DATA directory!\r\n");
+				Error_Handler();
+			}
 
-			f_closedir(&dir);
-			printf("Closing directory and attempting to open file.\n\r");
+			//Creating new filename
+			TCHAR filename[FILENAME_MAX_BYTES];
+			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/CAN_%05d.log", max_file_number + 1);
+			printf("New log name: %s \n\r", filename);
+
 			//Open file for writing (Create)
 			if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
 					!= FR_OK) {
 				printf("Failed to create new log file: %s ...!\r\n", filename);
 				Error_Handler();
 			}
-			printf("Starting new log file: %s ...\r\n", filename);
+			printf("Successfully created new log file: %s ...\r\n", filename);
 
+			//Starting CANRx interrupts
 			if (HAL_CAN_ActivateNotification(&hcan1,
 					CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
 				/* Notification Error */
@@ -235,16 +242,17 @@ int main(void)
 				Error_Handler();
 			}
 
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Green LED
+			printf("Ready to receive messages!\n\r");
+			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
 
 			state = STANDBY;
 			break;
 
 		case STANDBY:
-			if (POWER_STATE & buffer_filled)
-				state = SD_CARD_WRITE;
-			else if (!POWER_STATE)
+			if (!POWER_STATE) //Power switch is off
 				state = RESET_STATE;
+			else if (is_buffer_filled) //Buffer is filled
+				state = SD_CARD_WRITE;
 			break;
 
 		case PERIPHERAL_ERROR:
@@ -254,11 +262,8 @@ int main(void)
 			break;
 
 		case SD_CARD_WRITE:
-			res = f_write(&SDFile, filling_buffer ? buffer1 : buffer2,
-			ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER,
-					(void*) &byteswritten);
-			if ((byteswritten == 0) || (res != FR_OK)) {
-				printf("\r\nWriting Failed!\r\n");
+			if (f_write(&SDFile, data_buffer[!current_buffer], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
+				printf("Writing Failed!\r\n");
 				Error_Handler();
 			}
 
@@ -269,9 +274,7 @@ int main(void)
 			break;
 
 		case USB_TRANSMIT:
-			CDC_Transmit_FS(filling_buffer ? buffer1 : buffer2,
-			ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER);
-
+			CDC_Transmit_FS(data_buffer[!current_buffer], BUFFER_TOTAL_SIZE);
 			state = RESET_BUFFER;
 			break;
 
@@ -280,29 +283,24 @@ int main(void)
 
 		case RESET_BUFFER:
 			buffer_emptyings++;
-			printf("emptied buffer %d\n\r", !filling_buffer);
+			total_size += byteswritten;
+			printf("emptied buffer %d\n\r", !current_buffer);
 			printf("buffers emptied: %ld\n\r", buffer_emptyings);
 			printf("Wrote buffer sizeof: %ld\n\r", byteswritten);
-			total_size += byteswritten;
-			byteswritten = 0;
 
-			if (filling_buffer) {
-				buffer1[0] = '\00';
-			} else {
-				buffer2[0] = '\00';
-			}
-			double_buffer_fill_level[!filling_buffer] = 0;
-			buffer_filled = 0;
+			data_buffer[!current_buffer][0] = '\00';
+			buffer_fill_level[!current_buffer] = 0;
+			is_buffer_filled = 0;
+
+			byteswritten = 0;
 
 			state = STANDBY;
 			break;
 
 		case RESET_STATE:
-			HAL_CAN_DeactivateNotification(&hcan1,
-											CAN_IT_RX_FIFO0_MSG_PENDING);
+			HAL_CAN_DeactivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 			HAL_CAN_Stop(&hcan1);
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
-					GPIO_PIN_RESET); //Red LED
+			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
 			printf("total sizeof: %ld\n\r", total_size);
 			total_size = 0;
@@ -320,7 +318,7 @@ int main(void)
 
 			if (POWER_STATE) {
 				printf("Turning back on!\n\r");
-				HAL_Delay(3000);
+				HAL_Delay(1000);
 				state = TURN_ON;
 			}
 			break;
@@ -609,8 +607,8 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 			"(%010ld) X %08lX#%04X%04X%04X%04X\n", HAL_GetTick(),
 			RxHeader.ExtId, data1, data2, data3, data4);
 
-	strcat(filling_buffer ? buffer2 : buffer1, encodedData);
-	double_buffer_fill_level[filling_buffer]++;
+	strcat(current_buffer ? data_buffer[1] : data_buffer[0], encodedData);
+	buffer_fill_level[current_buffer]++;
 }
 
 HAL_StatusTypeDef CAN_Filter_Config(void) {
@@ -635,8 +633,8 @@ HAL_StatusTypeDef CAN_Filter_Config(void) {
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	if (double_buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
-			&& double_buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
+	if (buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
+			&& buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
 	{
 		printf("Buffers are full\n\r");
 		Error_Handler();
@@ -644,9 +642,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 
 	Get_and_Append_CAN_Message_to_Buffer();
 
-	if (double_buffer_fill_level[filling_buffer] == CAN_MESSAGES_TO_BUFFER) {
-		buffer_filled = 1;
-		filling_buffer = !filling_buffer;
+	if (buffer_fill_level[current_buffer] == CAN_MESSAGES_TO_BUFFER) {
+		is_buffer_filled = 1;
+		current_buffer = !current_buffer;
 	}
 }
 
