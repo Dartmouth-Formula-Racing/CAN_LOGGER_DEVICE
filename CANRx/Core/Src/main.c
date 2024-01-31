@@ -76,23 +76,13 @@ FRESULT res;
 DIR dir;		//Directory
 FILINFO fno;	// File Info
 
-int timestamp = 0;
-int received = 0;
-char encodedData[ENCODED_CAN_SIZE_BYTES];
-int messageReceived = 0;
-uint32_t byteswritten; /* File write/read counts */
-CAN_RxHeaderTypeDef RxHeader;
-uint8_t rcvd_msg[8];
-uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t POWER_STATE;
 
 char buffer1[ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER + 1];
 char buffer2[ENCODED_CAN_SIZE_BYTES * CAN_MESSAGES_TO_BUFFER + 1];
 uint8_t double_buffer_fill_level[2];
 uint8_t filling_buffer;
-uint32_t buffer_emptyings = 0;
 uint8_t buffer_filled = 0;
-uint32_t total_size = 0;
 /* USER CODE END 0 */
 
 /**
@@ -132,6 +122,7 @@ int main(void)
 
 	//States of our CAN DECODER
 	typedef enum {
+		TURN_ON,
 		PERIPHERAL_INIT,
 		CREATE_LOG_FILE,
 		STANDBY,
@@ -146,8 +137,11 @@ int main(void)
 		POWER_OFF
 	} state_t;
 	//Starting state is PERIPHERAL_INIT
-	POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
-	state_t state = POWER_STATE ? PERIPHERAL_INIT : POWER_OFF;
+	state_t state = TURN_ON;
+	uint32_t byteswritten; /* File write/read counts */
+	uint32_t buffer_emptyings = 0;
+	uint32_t total_size = 0;
+
 
   /* USER CODE END 2 */
 
@@ -155,6 +149,14 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 		switch (state) {
+		case TURN_ON:
+			MX_DMA_Init();
+			MX_SDMMC1_SD_Init();
+			MX_FATFS_Init();
+			POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
+			state = POWER_STATE ? PERIPHERAL_INIT : POWER_OFF;
+			break;
+
 		case PERIPHERAL_INIT:
 			buffer1[0] = '\00';
 			buffer2[0] = '\00';
@@ -197,7 +199,10 @@ int main(void)
 			char last_file_number[5];
 			uint16_t max_file_number = 0;
 			do {
-				f_readdir(&dir, &fno);
+				if (f_readdir(&dir, &fno) != FR_OK){
+					printf("Failed to read /CAN_DATA directory!\r\n");
+					Error_Handler();
+				}
 				if (fno.fname[0] != 0){
 					for(int i=4; i<9; i++)
 						last_file_number[i-4] = fno.fname[i];
@@ -205,13 +210,16 @@ int main(void)
 					if (max_file_number < strtol(last_file_number, NULL, 10))
 						max_file_number = strtol(last_file_number, NULL, 10);
 
+					printf("File Name String: %s File Name Number: %d\n\r", last_file_number, max_file_number + 1);
 					printf("File found: %s\n\r", fno.fname); // Print File Name
 				}
 			} while (fno.fname[0] != 0);
 
 			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/CAN_%05d.log", max_file_number + 1);
+			printf("Exited while with file Name String: %s \n\r", filename);
 
 			f_closedir(&dir);
+			printf("Closing directory and attempting to open file.\n\r");
 			//Open file for writing (Create)
 			if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
 					!= FR_OK) {
@@ -223,6 +231,7 @@ int main(void)
 			if (HAL_CAN_ActivateNotification(&hcan1,
 					CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
 				/* Notification Error */
+				printf("Failed to activate CAN\n\r");
 				Error_Handler();
 			}
 
@@ -273,9 +282,10 @@ int main(void)
 			buffer_emptyings++;
 			printf("emptied buffer %d\n\r", !filling_buffer);
 			printf("buffers emptied: %ld\n\r", buffer_emptyings);
-			printf("sizeof: %ld\n\r", byteswritten);
-
+			printf("Wrote buffer sizeof: %ld\n\r", byteswritten);
 			total_size += byteswritten;
+			byteswritten = 0;
+
 			if (filling_buffer) {
 				buffer1[0] = '\00';
 			} else {
@@ -288,12 +298,15 @@ int main(void)
 			break;
 
 		case RESET_STATE:
+			HAL_CAN_DeactivateNotification(&hcan1,
+											CAN_IT_RX_FIFO0_MSG_PENDING);
 			HAL_CAN_Stop(&hcan1);
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
 					GPIO_PIN_RESET); //Red LED
 
 			printf("total sizeof: %ld\n\r", total_size);
-
+			total_size = 0;
+			buffer_emptyings = 0;
 			printf("\r\nUnmounting!\r\n");
 			f_close(&SDFile);
 			f_mount(0, (TCHAR const*) NULL, 0);
@@ -307,12 +320,13 @@ int main(void)
 
 			if (POWER_STATE) {
 				printf("Turning back on!\n\r");
-				HAL_NVIC_SystemReset();
+				HAL_Delay(3000);
+				state = TURN_ON;
 			}
 			break;
 
 		default:
-			printf("CAN logger in unknown state!");
+			printf("CAN logger in unknown state!\n\r");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
 					GPIO_PIN_RESET); // Red LED
 			break;
@@ -575,14 +589,21 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 void Get_and_Append_CAN_Message_to_Buffer() {
+	CAN_RxHeaderTypeDef RxHeader;
+	uint8_t rcvd_msg[8];
+
 	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
-			!= HAL_OK)
+			!= HAL_OK){
+		printf("Failed to get CAN message\n\r");
 		Error_Handler();
+	}
 
 	uint16_t data1 = (rcvd_msg[0] << 8) + rcvd_msg[1];
 	uint16_t data2 = (rcvd_msg[2] << 8) + rcvd_msg[3];
 	uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
 	uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
+
+	char encodedData[ENCODED_CAN_SIZE_BYTES];
 
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
 			"(%010ld) X %08lX#%04X%04X%04X%04X\n", HAL_GetTick(),
@@ -616,7 +637,10 @@ HAL_StatusTypeDef CAN_Filter_Config(void) {
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	if (double_buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
 			&& double_buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
+	{
+		printf("Buffers are full\n\r");
 		Error_Handler();
+	}
 
 	Get_and_Append_CAN_Message_to_Buffer();
 
