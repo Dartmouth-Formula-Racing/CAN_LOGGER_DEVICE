@@ -62,6 +62,9 @@ void Error_Handler(void);
 #define MCO_GPIO_Port GPIOH
 #define Error_LED_Pin GPIO_PIN_12
 #define Error_LED_GPIO_Port GPIOF
+#define NewLogBtn_Pin GPIO_PIN_7
+#define NewLogBtn_GPIO_Port GPIOE
+#define NewLogBtn_EXTI_IRQn EXTI9_5_IRQn
 #define PowerSwitch_Pin GPIO_PIN_15
 #define PowerSwitch_GPIO_Port GPIOE
 #define PowerSwitch_EXTI_IRQn EXTI15_10_IRQn

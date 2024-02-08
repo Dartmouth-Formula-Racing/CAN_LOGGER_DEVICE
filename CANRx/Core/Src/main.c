@@ -44,6 +44,8 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan1;
 
+RTC_HandleTypeDef hrtc;
+
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
 DMA_HandleTypeDef hdma_sdmmc1_tx;
@@ -60,6 +62,7 @@ static void MX_DMA_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_RTC_Init(void);
 /* USER CODE BEGIN PFP */
 static HAL_StatusTypeDef CAN_Filter_Config(void);
 
@@ -77,6 +80,7 @@ DIR dir;		//Directory
 FILINFO fno;	// File Info
 
 uint8_t POWER_STATE;
+uint8_t NEW_LOG_FLAG;
 char data_buffer[2][BUFFER_TOTAL_SIZE + 1];
 uint8_t buffer_fill_level[2];
 uint8_t current_buffer;
@@ -116,6 +120,7 @@ int main(void)
   MX_USART3_UART_Init();
   MX_FATFS_Init();
   MX_USB_DEVICE_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
 	//States of our CAN DECODER
@@ -153,6 +158,7 @@ int main(void)
 			MX_FATFS_Init();
 			POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
 			state = POWER_STATE ? PERIPHERAL_INIT : POWER_OFF;
+			NEW_LOG_FLAG = 0;
 			break;
 
 		case PERIPHERAL_INIT:
@@ -211,7 +217,7 @@ int main(void)
 					if (max_file_number < strtol(last_file_number, NULL, 10))
 						max_file_number = strtol(last_file_number, NULL, 10);
 
-					printf("File found: %s\n\r", fno.fname); // Print File Name
+					//printf("File found: %s\n\r", fno.fname); // Print File Name
 				}
 			} while (fno.fname[0] != 0);
 
@@ -242,14 +248,14 @@ int main(void)
 				Error_Handler();
 			}
 
-			printf("Ready to receive messages!\n\r");
+			printf("Ready to receive messages!\r\n");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
 
 			state = STANDBY;
 			break;
 
 		case STANDBY:
-			if (!POWER_STATE) //Power switch is off
+			if (!POWER_STATE || NEW_LOG_FLAG) //Power switch is off or new log file
 				state = RESET_STATE;
 			else if (is_buffer_filled) //Buffer is filled
 				state = SD_CARD_WRITE;
@@ -305,11 +311,12 @@ int main(void)
 			printf("total sizeof: %ld\n\r", total_size);
 			total_size = 0;
 			buffer_emptyings = 0;
-			printf("\r\nUnmounting!\r\n");
+			printf("Unmounting SD Card!\r\n");
 			f_close(&SDFile);
 			f_mount(0, (TCHAR const*) NULL, 0);
 
-			printf("Turning off!\n\r");
+			if (!POWER_STATE)
+				printf("Turning off!\r\n");
 			state = POWER_OFF;
 			break;
 
@@ -317,8 +324,13 @@ int main(void)
 			HAL_Delay(1000);
 
 			if (POWER_STATE) {
-				printf("Turning back on!\n\r");
-				HAL_Delay(1000);
+				if (NEW_LOG_FLAG) {
+					NEW_LOG_FLAG = 0;
+					printf("\n\rResetting and starting new log file! \n\r");
+				}
+				else {
+					printf("\n\rTurning back on!\n\r");
+				}
 				state = TURN_ON;
 			}
 			break;
@@ -348,6 +360,11 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
+  /** Configure LSE Drive Capability
+  */
+  HAL_PWR_EnableBkUpAccess();
+  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_HIGH);
+
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
@@ -356,8 +373,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
@@ -419,6 +437,75 @@ static void MX_CAN1_Init(void)
   /* USER CODE BEGIN CAN1_Init 2 */
 
   /* USER CODE END CAN1_Init 2 */
+
+}
+
+/**
+  * @brief RTC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef sDate = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+  hrtc.Init.AsynchPrediv = 127;
+  hrtc.Init.SynchPrediv = 255;
+  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
+  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
+  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+
+  /* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 15;
+  sTime.Minutes = 55;
+  sTime.Seconds = 0;
+  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
+  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sDate.WeekDay = RTC_WEEKDAY_TUESDAY;
+  sDate.Month = RTC_MONTH_FEBRUARY;
+  sDate.Date = 6;
+  sDate.Year = 24;
+  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Enable the TimeStamp
+  */
+  if (HAL_RTCEx_SetTimeStamp(&hrtc, RTC_TIMESTAMPEDGE_RISING, RTC_TIMESTAMPPIN_DEFAULT) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
+
+  /* USER CODE END RTC_Init 2 */
 
 }
 
@@ -543,6 +630,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(Error_LED_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : NewLogBtn_Pin */
+  GPIO_InitStruct.Pin = NewLogBtn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(NewLogBtn_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : PE11 */
   GPIO_InitStruct.Pin = GPIO_PIN_11;
   GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
@@ -578,6 +671,9 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
