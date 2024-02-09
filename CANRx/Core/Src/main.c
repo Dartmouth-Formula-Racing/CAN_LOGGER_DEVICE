@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
+#include "ds1307_for_stm32_hal.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -44,7 +45,7 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan1;
 
-RTC_HandleTypeDef hrtc;
+I2C_HandleTypeDef hi2c1;
 
 SD_HandleTypeDef hsd1;
 DMA_HandleTypeDef hdma_sdmmc1_rx;
@@ -62,13 +63,13 @@ static void MX_DMA_Init(void);
 static void MX_CAN1_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_USART3_UART_Init(void);
-static void MX_RTC_Init(void);
+static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 static HAL_StatusTypeDef CAN_Filter_Config(void);
 
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 41
-#define CAN_MESSAGES_TO_BUFFER 128
+#define CAN_MESSAGES_TO_BUFFER 256
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
@@ -120,8 +121,9 @@ int main(void)
   MX_USART3_UART_Init();
   MX_FATFS_Init();
   MX_USB_DEVICE_Init();
-  MX_RTC_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
+  DS1307_Init(&hi2c1);
 
 	//States of our CAN DECODER
 	typedef enum {
@@ -162,6 +164,14 @@ int main(void)
 			break;
 
 		case PERIPHERAL_INIT:
+			uint8_t date = DS1307_GetDate();
+			uint8_t month = DS1307_GetMonth();
+			uint8_t year = DS1307_GetYear();
+			uint8_t hour = DS1307_GetHour();
+			uint8_t minute = DS1307_GetMinute();
+			uint8_t second = DS1307_GetSecond();
+			printf("%02d/%02d/20%02d %02d:%02d:%02d\n\r",month, date, year, hour, minute, second);
+
 			data_buffer[0][0] = '\00';
 			data_buffer[1][0] = '\00';
 			buffer_fill_level[0] = 0;
@@ -360,11 +370,6 @@ void SystemClock_Config(void)
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-  /** Configure LSE Drive Capability
-  */
-  HAL_PWR_EnableBkUpAccess();
-  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_HIGH);
-
   /** Configure the main internal regulator output voltage
   */
   __HAL_RCC_PWR_CLK_ENABLE();
@@ -373,9 +378,8 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE|RCC_OSCILLATORTYPE_LSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 4;
@@ -441,71 +445,50 @@ static void MX_CAN1_Init(void)
 }
 
 /**
-  * @brief RTC Initialization Function
+  * @brief I2C1 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_RTC_Init(void)
+static void MX_I2C1_Init(void)
 {
 
-  /* USER CODE BEGIN RTC_Init 0 */
+  /* USER CODE BEGIN I2C1_Init 0 */
 
-  /* USER CODE END RTC_Init 0 */
+  /* USER CODE END I2C1_Init 0 */
 
-  RTC_TimeTypeDef sTime = {0};
-  RTC_DateTypeDef sDate = {0};
+  /* USER CODE BEGIN I2C1_Init 1 */
 
-  /* USER CODE BEGIN RTC_Init 1 */
+  /* USER CODE END I2C1_Init 1 */
+  hi2c1.Instance = I2C1;
+  hi2c1.Init.Timing = 0x00506682;
+  hi2c1.Init.OwnAddress1 = 0;
+  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c1.Init.OwnAddress2 = 0;
+  hi2c1.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
-  /* USER CODE END RTC_Init 1 */
-
-  /** Initialize RTC Only
+  /** Configure Analogue filter
   */
-  hrtc.Instance = RTC;
-  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
-  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
-  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
-  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
-  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c1, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
   {
     Error_Handler();
   }
 
-  /* USER CODE BEGIN Check_RTC_BKUP */
-
-  /* USER CODE END Check_RTC_BKUP */
-
-  /** Initialize RTC and set the Time and Date
+  /** Configure Digital filter
   */
-  sTime.Hours = 15;
-  sTime.Minutes = 55;
-  sTime.Seconds = 0;
-  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c1, 0) != HAL_OK)
   {
     Error_Handler();
   }
-  sDate.WeekDay = RTC_WEEKDAY_TUESDAY;
-  sDate.Month = RTC_MONTH_FEBRUARY;
-  sDate.Date = 6;
-  sDate.Year = 24;
-  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
-  {
-    Error_Handler();
-  }
+  /* USER CODE BEGIN I2C1_Init 2 */
 
-  /** Enable the TimeStamp
-  */
-  if (HAL_RTCEx_SetTimeStamp(&hrtc, RTC_TIMESTAMPEDGE_RISING, RTC_TIMESTAMPPIN_DEFAULT) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN RTC_Init 2 */
-
-  /* USER CODE END RTC_Init 2 */
+  /* USER CODE END I2C1_Init 2 */
 
 }
 
