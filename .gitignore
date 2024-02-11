@@ -1,0 +1,7 @@
+.DS_Store/
+.metadata/
+CANRx/.metadata/
+can-venv/
+data/
+src/__pycache__
+*.txt
