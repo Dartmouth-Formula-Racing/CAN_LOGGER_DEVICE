@@ -235,6 +235,8 @@ void EXTI9_5_IRQHandler(void)
 void EXTI15_10_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
+	// Debouncing?
+//	HAL_Delay(100);
 	POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
 
   /* USER CODE END EXTI15_10_IRQn 0 */

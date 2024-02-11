@@ -69,7 +69,7 @@ static HAL_StatusTypeDef CAN_Filter_Config(void);
 
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 41
-#define CAN_MESSAGES_TO_BUFFER 256
+#define CAN_MESSAGES_TO_BUFFER 100
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
@@ -82,10 +82,19 @@ FILINFO fno;	// File Info
 
 uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
-char data_buffer[2][BUFFER_TOTAL_SIZE + 1];
+char data_buffer[2][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
 uint8_t buffer_fill_level[2];
 uint8_t current_buffer;
 uint8_t is_buffer_filled = 0;
+
+uint8_t curr_date;
+uint8_t curr_month;
+uint8_t curr_year;
+uint8_t curr_hour;
+uint8_t curr_minute;
+uint8_t curr_second;
+uint32_t starting_tick;
+
 /* USER CODE END 0 */
 
 /**
@@ -141,6 +150,7 @@ int main(void)
 		RESET_STATE,
 		POWER_OFF
 	} state_t;
+
 	//Starting state is PERIPHERAL_INIT
 	state_t state = TURN_ON;
 	uint32_t byteswritten; /* File write/read counts */
@@ -154,6 +164,21 @@ int main(void)
   /* USER CODE BEGIN WHILE */
 	while (1) {
 		switch (state) {
+
+		/**
+		 * State: TURN_ON
+		 *
+		 * Description: Initializes middleware functions for working with
+		 * SD card. Decides if the device is on or off
+		 *
+		 *
+		 * Transition in:
+		 * 	Starting state (no other way to enter this state)
+		 *
+		 * Transition out:
+		 * 	If power switch is set to on position -> PERIFPHERAL_INIT
+		 * 	else (power switch is set to off) -> POWER_OFF
+		 */
 		case TURN_ON:
 			MX_DMA_Init();
 			MX_SDMMC1_SD_Init();
@@ -163,25 +188,30 @@ int main(void)
 			NEW_LOG_FLAG = 0;
 			break;
 
+		/**
+		 * State: PERIPHERAL_INIT
+		 *
+		 * Description: Empties data buffers, initializes CAN, and mounts SD card
+		 *
+		 * Transition in:
+		 * 	From TURN_ON when power switch is set to on position
+		 *
+		 * Transition out:
+		 * 	Always -> CREATE_LOG_FILE
+		 */
 		case PERIPHERAL_INIT:
-			uint8_t date = DS1307_GetDate();
-			uint8_t month = DS1307_GetMonth();
-			uint8_t year = DS1307_GetYear();
-			uint8_t hour = DS1307_GetHour();
-			uint8_t minute = DS1307_GetMinute();
-			uint8_t second = DS1307_GetSecond();
-			printf("%02d/%02d/20%02d %02d:%02d:%02d\n\r",month, date, year, hour, minute, second);
-
+			// Reset both buffers
 			data_buffer[0][0] = '\00';
 			data_buffer[1][0] = '\00';
 			buffer_fill_level[0] = 0;
 			buffer_fill_level[1] = 0;
 			current_buffer = 0;
 
+			// Turn Red LED on (Green turns off)
 			printf("Initializing Peripherals...\r\n");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
-			//Initializing CAN
+			// Initializing CAN
 			if (HAL_CAN_Start(&hcan1) != HAL_OK) {
 				printf("CAN could not start.\r\n");
 				Error_Handler();
@@ -192,7 +222,7 @@ int main(void)
 			}
 			printf("CAN initialization succeeded...\r\n");
 
-			//Mount and Format SD Card
+			// Mount and Format SD Card
 			if (f_mount(&SDFatFS, SDPath, 0) != FR_OK) {
 				printf("Mounting failed!\r\n");
 				Error_Handler();
@@ -203,46 +233,41 @@ int main(void)
 			state = CREATE_LOG_FILE;
 			break;
 
+
+		/**
+		 * State: CREATE_LOG_FILE
+		 *
+		 * Description: Updates date/time info, names current log with current time, starts to receive CAN messages
+		 *
+		 * Transition in:
+		 * 	From PERIPHERAL_INIT, always
+		 *
+		 * Transition out:
+		 * 	Always -> STANDBY
+		 */
 		case CREATE_LOG_FILE:
 			printf("Creating new log file...\r\n");
 
-			//Opening CAN_DATA directory
-			if (f_opendir(&dir, "/CAN_DATA") != FR_OK) {
-				printf("Failed to open /CAN_DATA directory!\r\n");
-				Error_Handler();
-			}
+			// Update current date/time info
+			curr_date = DS1307_GetDate();
+			curr_month = DS1307_GetMonth();
+			curr_year = DS1307_GetYear();
+			curr_hour = DS1307_GetHour();
+			curr_minute = DS1307_GetMinute();
+			curr_second = DS1307_GetSecond();
+			starting_tick = HAL_GetTick();
+			printf("%02d/%02d/20%02d %02d:%02d:%02d\r\n",
+					curr_month, curr_date, curr_year, curr_hour, curr_minute, curr_second);
 
-			// Finding next filename
-			char last_file_number[5];
-			uint16_t max_file_number = 0;
-			do {
-				if (f_readdir(&dir, &fno) != FR_OK){
-					printf("Failed to read /CAN_DATA directory!\r\n");
-					Error_Handler();
-				}
-				if (fno.fname[0] != 0){
-					for(int i=4; i<9; i++)
-						last_file_number[i-4] = fno.fname[i];
-
-					if (max_file_number < strtol(last_file_number, NULL, 10))
-						max_file_number = strtol(last_file_number, NULL, 10);
-
-					//printf("File found: %s\n\r", fno.fname); // Print File Name
-				}
-			} while (fno.fname[0] != 0);
-
-			//Closing CAN_DATA directory
-			if (f_closedir(&dir) != FR_OK) {
-				printf("Failed to close /CAN_DATA directory!\r\n");
-				Error_Handler();
-			}
-
-			//Creating new filename
+			// Creating new filename
 			TCHAR filename[FILENAME_MAX_BYTES];
-			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/CAN_%05d.log", max_file_number + 1);
-			printf("New log name: %s \n\r", filename);
+			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/%02d-%02d-20%02d_(%02dh-%02dm-%02ds).log",
+					curr_month, curr_date, curr_year,
+					curr_hour, curr_month, curr_second);
 
-			//Open file for writing (Create)
+			printf("New log name: %s ", filename);
+
+			// Open file for writing (Create)
 			if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
 					!= FR_OK) {
 				printf("Failed to create new log file: %s ...!\r\n", filename);
@@ -250,20 +275,34 @@ int main(void)
 			}
 			printf("Successfully created new log file: %s ...\r\n", filename);
 
-			//Starting CANRx interrupts
+			// Starting CANRx interrupts
 			if (HAL_CAN_ActivateNotification(&hcan1,
 					CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
 				/* Notification Error */
-				printf("Failed to activate CAN\n\r");
+				printf("Failed to activate CAN\r\n");
 				Error_Handler();
 			}
 
+			// Turn Green LED on (turns Red LED off)
 			printf("Ready to receive messages!\r\n");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
 
 			state = STANDBY;
 			break;
 
+		/**
+		 * State: STANDBY
+		 *
+		 * Description: Waits to either power off, create a new log, or empty a buffer to the SD card
+		 *
+		 * Transition in:
+		 * 	From CREATE_LOG_FILE, always
+		 *
+		 * Transition out:
+		 * 	If power switch is set to off position or the new file button is clicked -> RESET_STATE
+		 * 	Else if the current buffer is filled -> SD_CARD_WRITE
+		 * 	Else -> STANDBY
+		 */
 		case STANDBY:
 			if (!POWER_STATE || NEW_LOG_FLAG) //Power switch is off or new log file
 				state = RESET_STATE;
@@ -277,6 +316,17 @@ int main(void)
 		case SWITCH_BUFFER:
 			break;
 
+		/**
+		 * State: SD_CARD_WRITE
+		 *
+		 * Description: Writes the contents of the buffer not currently being filled to the SD card
+		 *
+		 * Transition in:
+		 *	From STANDBY when a buffer fills
+		 *
+		 * Transition out:
+		 *	Always -> USB_TRANSMIT
+		 */
 		case SD_CARD_WRITE:
 			if (f_write(&SDFile, data_buffer[!current_buffer], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
 				printf("Writing Failed!\r\n");
@@ -289,6 +339,17 @@ int main(void)
 		case SD_CARD_WRITE_ERROR:
 			break;
 
+		/**
+		 * State: USB_TRANSMIT
+		 *
+		 * Description: Write the filled buffer over USB
+		 *
+		 * Transition in:
+		 *	From SD_CARD_WRITE, always
+		 *
+		 * Transition out:
+		 *	Always -> RESET_BUFFER
+		 */
 		case USB_TRANSMIT:
 			CDC_Transmit_FS(data_buffer[!current_buffer], BUFFER_TOTAL_SIZE);
 			state = RESET_BUFFER;
@@ -297,13 +358,26 @@ int main(void)
 		case USB_TRANSMIT_ERROR:
 			break;
 
+		/**
+		 * State: RESET_BUFFER
+		 *
+		 * Description: Prints debugging information then empties the buffer that was written to the SD and USB
+		 *
+		 * Transition in:
+		 *	From USB_TRANSMIT, always
+		 *
+		 * Transition out:
+		 *	Always -> STANDBY
+		 */
 		case RESET_BUFFER:
+			// bookkeeping information (just for debugging)
 			buffer_emptyings++;
 			total_size += byteswritten;
-			printf("emptied buffer %d\n\r", !current_buffer);
-			printf("buffers emptied: %ld\n\r", buffer_emptyings);
-			printf("Wrote buffer sizeof: %ld\n\r", byteswritten);
+			printf("emptied buffer %d\r\n", !current_buffer);
+			printf("buffers emptied: %ld\r\n", buffer_emptyings);
+			printf("Wrote buffer sizeof: %ld\r\n", byteswritten);
 
+			// Reset buffer that was just sent to SD and USB
 			data_buffer[!current_buffer][0] = '\00';
 			buffer_fill_level[!current_buffer] = 0;
 			is_buffer_filled = 0;
@@ -313,12 +387,27 @@ int main(void)
 			state = STANDBY;
 			break;
 
+		/**
+		 * State: RESET_STATE
+		 *
+		 * Description: Disable CAN interrupt, close the log file, and unmount the SD
+		 *
+		 * Transition in:
+		 *	From STANDBY if the new file button was pressed or the switch was left in the power off position
+		 *
+		 * Transition out:
+		 *	Always -> POWER_OFF
+		 */
 		case RESET_STATE:
+			// Turn off CAN interrupt
 			HAL_CAN_DeactivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 			HAL_CAN_Stop(&hcan1);
+
+			// Turn Red LED on (Green LED turns off)
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
-			printf("total sizeof: %ld\n\r", total_size);
+			// Debugging information
+			printf("total sizeof: %ld\r\n", total_size);
 			total_size = 0;
 			buffer_emptyings = 0;
 			printf("Unmounting SD Card!\r\n");
@@ -330,23 +419,35 @@ int main(void)
 			state = POWER_OFF;
 			break;
 
+		/**
+		 * State: POWER_OFF
+		 *
+		 * Description: Stay in this state until the power switch is put in the on position
+		 *
+		 * Transition in:
+		 *	From RESET_STATE, always
+		 *
+		 * Transition out:
+		 *	If power switch is in the on position -> TURN_ON
+		 *	Else -> POWER_OFF
+		 */
 		case POWER_OFF:
-			HAL_Delay(1000);
-
 			if (POWER_STATE) {
+				// Button was pressed
 				if (NEW_LOG_FLAG) {
 					NEW_LOG_FLAG = 0;
-					printf("\n\rResetting and starting new log file! \n\r");
+					printf("\r\nResetting and starting new log file! \r\n");
 				}
+				// Button was not pressed
 				else {
-					printf("\n\rTurning back on!\n\r");
+					printf("\r\nTurning back on!\r\n");
 				}
 				state = TURN_ON;
 			}
 			break;
 
 		default:
-			printf("CAN logger in unknown state!\n\r");
+			printf("CAN logger in unknown state!\r\n");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
 					GPIO_PIN_RESET); // Red LED
 			break;
@@ -671,7 +772,7 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 
 	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
 			!= HAL_OK){
-		printf("Failed to get CAN message\n\r");
+		printf("Failed to get CAN message\r\n");
 		Error_Handler();
 	}
 
@@ -682,6 +783,7 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 
 	char encodedData[ENCODED_CAN_SIZE_BYTES];
 
+	// consider writing raw bytes
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
 			"(%010ld) X %08lX#%04X%04X%04X%04X\n", HAL_GetTick(),
 			RxHeader.ExtId, data1, data2, data3, data4);
@@ -715,7 +817,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	if (buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
 			&& buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
 	{
-		printf("Buffers are full\n\r");
+		printf("Buffers are full\r\n");
 		Error_Handler();
 	}
 
