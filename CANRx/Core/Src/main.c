@@ -325,7 +325,20 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 			printf("Ready to receive messages!\r\n");
 #endif
+
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
+
+			// purge FIFO in case there are old messages
+			while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) != 0) {
+				CAN_RxHeaderTypeDef RxHeader;
+				uint8_t rcvd_msg[8];
+				if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
+						printf("Failed to get CAN message\r\n");
+#endif
+						Error_Handler();
+					}
+			}
 
 			state = STANDBY;
 			break;
