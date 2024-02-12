@@ -40,6 +40,8 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
+//#define VERBOSE_DEBUGGING
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -154,9 +156,10 @@ int main(void)
 	//Starting state is PERIPHERAL_INIT
 	state_t state = TURN_ON;
 	uint32_t byteswritten; /* File write/read counts */
+#ifdef VERBOSE_DEBUGGING
 	uint32_t buffer_emptyings = 0;
 	uint32_t total_size = 0;
-
+#endif
 
   /* USER CODE END 2 */
 
@@ -173,7 +176,9 @@ int main(void)
 		 *
 		 *
 		 * Transition in:
-		 * 	Starting state (no other way to enter this state)
+		 * 	Starting state
+		 * 	From POWER_OFF if power switch is in the on position
+		 * 	From RESET_BUFFER if power switch is in the on position (button was pressed)
 		 *
 		 * Transition out:
 		 * 	If power switch is set to on position -> PERIFPHERAL_INIT
@@ -208,27 +213,38 @@ int main(void)
 			current_buffer = 0;
 
 			// Turn Red LED on (Green turns off)
+#ifdef VERBOSE_DEBUGGING
 			printf("Initializing Peripherals...\r\n");
+#endif
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
 			// Initializing CAN
 			if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
 				printf("CAN could not start.\r\n");
+#endif
 				Error_Handler();
 			}
 			if (CAN_Filter_Config() != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
 				printf("CAN filter failed to set.\r\n");
+#endif
 				Error_Handler();
 			}
+#ifdef VERBOSE_DEBUGGING
 			printf("CAN initialization succeeded...\r\n");
+#endif
 
 			// Mount and Format SD Card
 			if (f_mount(&SDFatFS, SDPath, 0) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
 				printf("Mounting failed!\r\n");
+#endif
 				Error_Handler();
 			}
-
+#ifdef VERBOSE_DEBUGGING
 			printf("SD initialization succeeded...\r\n");
+#endif
 
 			state = CREATE_LOG_FILE;
 			break;
@@ -246,7 +262,9 @@ int main(void)
 		 * 	Always -> STANDBY
 		 */
 		case CREATE_LOG_FILE:
+#ifdef VERBOSE_DEBUGGING
 			printf("Creating new log file...\r\n");
+#endif
 
 			// Update current date/time info
 			curr_date = DS1307_GetDate();
@@ -256,8 +274,10 @@ int main(void)
 			curr_minute = DS1307_GetMinute();
 			curr_second = DS1307_GetSecond();
 			starting_tick = HAL_GetTick();
+#ifdef VERBOSE_DEBUGGING
 			printf("%02d/%02d/20%02d %02d:%02d:%02d\r\n",
 					curr_month, curr_date, curr_year, curr_hour, curr_minute, curr_second);
+#endif
 
 			// Creating new filename
 			TCHAR filename[FILENAME_MAX_BYTES];
@@ -265,26 +285,36 @@ int main(void)
 					curr_month, curr_date, curr_year,
 					curr_hour, curr_month, curr_second);
 
+#ifdef VERBOSE_DEBUGGING
 			printf("New log name: %s ", filename);
+#endif
 
 			// Open file for writing (Create)
 			if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
 					!= FR_OK) {
+#ifdef VERBOSE_DEBUGGING
 				printf("Failed to create new log file: %s ...!\r\n", filename);
+#endif
 				Error_Handler();
 			}
+#ifdef VERBOSE_DEBUGGING
 			printf("Successfully created new log file: %s ...\r\n", filename);
+#endif
 
 			// Starting CANRx interrupts
 			if (HAL_CAN_ActivateNotification(&hcan1,
 					CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
 				/* Notification Error */
+#ifdef VERBOSE_DEBUGGING
 				printf("Failed to activate CAN\r\n");
+#endif
 				Error_Handler();
 			}
 
 			// Turn Green LED on (turns Red LED off)
+#ifdef VERBOSE_DEBUGGING
 			printf("Ready to receive messages!\r\n");
+#endif
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
 
 			state = STANDBY;
@@ -329,7 +359,9 @@ int main(void)
 		 */
 		case SD_CARD_WRITE:
 			if (f_write(&SDFile, data_buffer[!current_buffer], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
+#ifdef VERBOSE_DEBUGGING
 				printf("Writing Failed!\r\n");
+#endif
 				Error_Handler();
 			}
 
@@ -371,12 +403,13 @@ int main(void)
 		 */
 		case RESET_BUFFER:
 			// bookkeeping information (just for debugging)
+#ifdef VERBOSE_DEBUGGING
 			buffer_emptyings++;
 			total_size += byteswritten;
 			printf("emptied buffer %d\r\n", !current_buffer);
 			printf("buffers emptied: %ld\r\n", buffer_emptyings);
 			printf("Wrote buffer sizeof: %ld\r\n", byteswritten);
-
+#endif
 			// Reset buffer that was just sent to SD and USB
 			data_buffer[!current_buffer][0] = '\00';
 			buffer_fill_level[!current_buffer] = 0;
@@ -396,7 +429,8 @@ int main(void)
 		 *	From STANDBY if the new file button was pressed or the switch was left in the power off position
 		 *
 		 * Transition out:
-		 *	Always -> POWER_OFF
+		 *	If power switch is in off position -> POWER_OFF
+		 *	Else (button was pressed) -> TURN_ON
 		 */
 		case RESET_STATE:
 			// Turn off CAN interrupt
@@ -406,17 +440,25 @@ int main(void)
 			// Turn Red LED on (Green LED turns off)
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
 
+#ifdef VERBOSE_DEBUGGING
 			// Debugging information
 			printf("total sizeof: %ld\r\n", total_size);
 			total_size = 0;
 			buffer_emptyings = 0;
 			printf("Unmounting SD Card!\r\n");
+#endif
 			f_close(&SDFile);
 			f_mount(0, (TCHAR const*) NULL, 0);
 
-			if (!POWER_STATE)
+			if (!POWER_STATE) {
+				state = POWER_OFF;
+#ifdef VERBOSE_DEBUGGING
 				printf("Turning off!\r\n");
-			state = POWER_OFF;
+#endif
+			}
+			else {
+				state = TURN_ON; // button was pressed
+			}
 			break;
 
 		/**
@@ -433,23 +475,21 @@ int main(void)
 		 */
 		case POWER_OFF:
 			if (POWER_STATE) {
-				// Button was pressed
-				if (NEW_LOG_FLAG) {
-					NEW_LOG_FLAG = 0;
-					printf("\r\nResetting and starting new log file! \r\n");
-				}
-				// Button was not pressed
-				else {
-					printf("\r\nTurning back on!\r\n");
-				}
 				state = TURN_ON;
+
+#ifdef VERBOSE_DEBUGGING
+				printf("\r\nTurning back on!\r\n");
+#endif
 			}
 			break;
 
 		default:
-			printf("CAN logger in unknown state!\r\n");
 			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
-					GPIO_PIN_RESET); // Red LED
+								GPIO_PIN_RESET); // Red LED
+
+#ifdef VERBOSE_DEBUGGING
+			printf("CAN logger in unknown state!\r\n");
+#endif
 			break;
 
 		}
@@ -772,7 +812,9 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 
 	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
 			!= HAL_OK){
+#ifdef VERBOSE_DEBUGGING
 		printf("Failed to get CAN message\r\n");
+#endif
 		Error_Handler();
 	}
 
@@ -817,7 +859,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	if (buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
 			&& buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
 	{
+#ifdef VERBOSE_DEBUGGING
 		printf("Buffers are full\r\n");
+#endif
 		Error_Handler();
 	}
 
@@ -853,7 +897,9 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
 	/* User can add his own implementation to report the HAL error return state */
 	__disable_irq();
+#ifdef VERBOSE_DEBUGGING
 	printf("\r\nError Handler Reached\r\n");
+#endif
 	HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET);
 
 	while (1) {

@@ -5,4 +5,4 @@ can-venv/
 data/
 src/__pycache__
 *.txt
-CANRx/Debug/
+CANRx/
