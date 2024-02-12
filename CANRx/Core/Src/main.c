@@ -40,7 +40,7 @@
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
 
-//#define VERBOSE_DEBUGGING
+#define VERBOSE_DEBUGGING
 
 /* USER CODE END PM */
 
@@ -81,6 +81,7 @@ static HAL_StatusTypeDef CAN_Filter_Config(void);
 FRESULT res;
 DIR dir;		//Directory
 FILINFO fno;	// File Info
+const char *data_directory = "/CAN_DATA";
 
 uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
@@ -278,15 +279,24 @@ int main(void)
 			printf("%02d/%02d/20%02d %02d:%02d:%02d\r\n",
 					curr_month, curr_date, curr_year, curr_hour, curr_minute, curr_second);
 #endif
+			if (f_stat(data_directory, &fno) != FR_OK) {
+				if (f_mkdir(data_directory) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+					printf("Data directory not present and failed to create it.");
+#endif
+					Error_Handler();
+				}
+			}
 
 			// Creating new filename
 			TCHAR filename[FILENAME_MAX_BYTES];
-			snprintf(filename, FILENAME_MAX_BYTES, "/CAN_DATA/%02d-%02d-20%02d_(%02dh-%02dm-%02ds).log",
+			snprintf(filename, FILENAME_MAX_BYTES, "%s/%02d-%02d-20%02d_(%02dh-%02dm-%02ds).log",
+					data_directory,
 					curr_month, curr_date, curr_year,
-					curr_hour, curr_month, curr_second);
+					curr_hour, curr_minute, curr_second);
 
 #ifdef VERBOSE_DEBUGGING
-			printf("New log name: %s ", filename);
+			printf("New log name: %s \r\n", filename);
 #endif
 
 			// Open file for writing (Create)
