@@ -137,6 +137,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   DS1307_Init(&hi2c1);
 
+
+
 	//States of our CAN DECODER
 	typedef enum {
 		TURN_ON,
@@ -217,7 +219,7 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 			printf("Initializing Peripherals...\r\n");
 #endif
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
+			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET); //Red LED
 
 			// Initializing CAN
 			if (HAL_CAN_Start(&hcan1) != HAL_OK) {
@@ -326,7 +328,7 @@ int main(void)
 			printf("Ready to receive messages!\r\n");
 #endif
 
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_SET); // Successful LED
+			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_SET); // Successful LED
 
 			// purge FIFO in case there are old messages
 			while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) != 0) {
@@ -384,6 +386,12 @@ int main(void)
 			if (f_write(&SDFile, data_buffer[!current_buffer], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
 #ifdef VERBOSE_DEBUGGING
 				printf("Writing Failed!\r\n");
+#endif
+				Error_Handler();
+			}
+			if (f_sync(&SDFile) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+				printf("Sync Failed!\r\n");
 #endif
 				Error_Handler();
 			}
@@ -461,7 +469,7 @@ int main(void)
 			HAL_CAN_Stop(&hcan1);
 
 			// Turn Red LED on (Green LED turns off)
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET); //Red LED
+			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET); //Red LED
 
 #ifdef VERBOSE_DEBUGGING
 			// Debugging information
@@ -507,7 +515,7 @@ int main(void)
 			break;
 
 		default:
-			HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin,
+			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin,
 								GPIO_PIN_RESET); // Red LED
 
 #ifdef VERBOSE_DEBUGGING
@@ -755,33 +763,43 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOF_CLK_ENABLE();
+  __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
-  __HAL_RCC_GPIOG_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PokManualReset_GPIO_Port, PokManualReset_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(USB_PowerSwitchOn_GPIO_Port, USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOG, StatusSignal_Pin|USB_PowerSwitchOn_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(LD2_GPIO_Port, LD2_Pin, GPIO_PIN_RESET);
+  /*Configure GPIO pin : PokRESET_Pin */
+  GPIO_InitStruct.Pin = PokRESET_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(PokRESET_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : Error_LED_Pin */
-  GPIO_InitStruct.Pin = Error_LED_Pin;
+  /*Configure GPIO pin : PokManualReset_Pin */
+  GPIO_InitStruct.Pin = PokManualReset_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(Error_LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(PokManualReset_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : NewLogBtn_Pin */
-  GPIO_InitStruct.Pin = NewLogBtn_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  /*Configure GPIO pins : StatusSignal_Pin USB_PowerSwitchOn_Pin */
+  GPIO_InitStruct.Pin = StatusSignal_Pin|USB_PowerSwitchOn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(NewLogBtn_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PowerSwitch_Pin */
+  GPIO_InitStruct.Pin = PowerSwitch_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(PowerSwitch_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PE11 */
   GPIO_InitStruct.Pin = GPIO_PIN_11;
@@ -791,35 +809,24 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF6_DFSDM1;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PowerSwitch_Pin */
-  GPIO_InitStruct.Pin = PowerSwitch_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PowerSwitch_GPIO_Port, &GPIO_InitStruct);
-
   /*Configure GPIO pins : SD_CD_Pin USB_OverCurrent_Pin */
   GPIO_InitStruct.Pin = SD_CD_Pin|USB_OverCurrent_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOG, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : USB_PowerSwitchOn_Pin */
-  GPIO_InitStruct.Pin = USB_PowerSwitchOn_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : NewLogBtn_Pin */
+  GPIO_InitStruct.Pin = NewLogBtn_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(USB_PowerSwitchOn_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : LD2_Pin */
-  GPIO_InitStruct.Pin = LD2_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(LD2_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(NewLogBtn_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
@@ -923,7 +930,7 @@ void Error_Handler(void)
 #ifdef VERBOSE_DEBUGGING
 	printf("\r\nError Handler Reached\r\n");
 #endif
-	HAL_GPIO_WritePin(Error_LED_GPIO_Port, Error_LED_Pin, GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET);
 
 	while (1) {
 	}
