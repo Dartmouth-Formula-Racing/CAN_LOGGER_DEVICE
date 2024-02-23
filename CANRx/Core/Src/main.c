@@ -69,8 +69,9 @@ static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 static HAL_StatusTypeDef CAN_Filter_Config(void);
 
+#define SIZE_OF_CAN_RCVD_MSG 8
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define ENCODED_CAN_SIZE_BYTES 41
+#define ENCODED_CAN_SIZE_BYTES (SIZE_OF_CAN_RCVD_MSG + sizeof(uint32_t) * 2)
 #define CAN_MESSAGES_TO_BUFFER 100
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
@@ -85,7 +86,9 @@ const char *data_directory = "/CAN_DATA";
 
 uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
-char data_buffer[2][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
+uint8_t data_buffer[2][BUFFER_TOTAL_SIZE];
+uint8_t *curr_data_buffer_loc;
+
 uint8_t buffer_fill_level[2];
 uint8_t current_buffer;
 uint8_t is_buffer_filled = 0;
@@ -209,6 +212,7 @@ int main(void)
 		 */
 		case PERIPHERAL_INIT:
 			// Reset both buffers
+			curr_data_buffer_loc = data_buffer[0];
 			data_buffer[0][0] = '\00';
 			data_buffer[1][0] = '\00';
 			buffer_fill_level[0] = 0;
@@ -836,9 +840,16 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void Append_uint32_t_to_uint8_t_pointer_and_move_pointer(uint32_t data, uint8_t **arr_ptr) {
+	*((*arr_ptr)++) = (data >> 24) & 0xFF;
+	*((*arr_ptr)++) = (data >> 16) & 0xFF;
+	*((*arr_ptr)++) = (data >> 8) & 0xFF;
+	*((*arr_ptr)++) = (data) & 0xFF;
+}
+
 void Get_and_Append_CAN_Message_to_Buffer() {
 	CAN_RxHeaderTypeDef RxHeader;
-	uint8_t rcvd_msg[8];
+	uint8_t rcvd_msg[SIZE_OF_CAN_RCVD_MSG];
 
 	if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
 			!= HAL_OK){
@@ -848,19 +859,18 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 		Error_Handler();
 	}
 
-	uint16_t data1 = (rcvd_msg[0] << 8) + rcvd_msg[1];
-	uint16_t data2 = (rcvd_msg[2] << 8) + rcvd_msg[3];
-	uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
-	uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
+	// timestamp
+	Append_uint32_t_to_uint8_t_pointer_and_move_pointer(HAL_GetTick(), &curr_data_buffer_loc);
 
-	char encodedData[ENCODED_CAN_SIZE_BYTES];
+	// identifier
+	Append_uint32_t_to_uint8_t_pointer_and_move_pointer(RxHeader.ExtId, &curr_data_buffer_loc);
 
-	// consider writing raw bytes
-	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
-			"(%010ld) X %08lX#%04X%04X%04X%04X\n", HAL_GetTick(),
-			RxHeader.ExtId, data1, data2, data3, data4);
 
-	strcat(current_buffer ? data_buffer[1] : data_buffer[0], encodedData);
+	// data
+	for (int msg_byte_idx = 0; msg_byte_idx < SIZE_OF_CAN_RCVD_MSG; msg_byte_idx++) {
+		*(curr_data_buffer_loc++) = rcvd_msg[msg_byte_idx];
+	}
+
 	buffer_fill_level[current_buffer]++;
 }
 
@@ -900,6 +910,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 	if (buffer_fill_level[current_buffer] == CAN_MESSAGES_TO_BUFFER) {
 		is_buffer_filled = 1;
 		current_buffer = !current_buffer;
+		curr_data_buffer_loc = data_buffer[current_buffer];
 	}
 }
 
