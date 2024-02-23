@@ -85,7 +85,7 @@ static HAL_StatusTypeDef CAN_Filter_Config(void);
 static CANRX_ERROR_T INIT_PERIPHERALS(void);
 static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define ENCODED_CAN_SIZE_BYTES 41
+#define ENCODED_CAN_SIZE_BYTES 38
 #define CAN_MESSAGES_TO_BUFFER 100
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
@@ -397,9 +397,9 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 			buffer_emptyings++;
 			total_size += byteswritten;
-			printf("emptied buffer %d\r\n", !current_buffer);
-			printf("buffers emptied: %ld\r\n", buffer_emptyings);
-			printf("Wrote buffer sizeof: %ld\r\n", byteswritten);
+//			printf("emptied buffer %d\r\n", !current_buffer);
+//			printf("buffers emptied: %ld\r\n", buffer_emptyings);
+//			printf("Wrote buffer sizeof: %ld\r\n", byteswritten);
 #endif
 			// Reset buffer that was just sent to SD and USB
 			data_buffer[!current_buffer][0] = '\00';
@@ -878,17 +878,15 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 		Error_Handler();
 	}
 
-	uint16_t data1 = (rcvd_msg[0] << 8) + rcvd_msg[1];
-	uint16_t data2 = (rcvd_msg[2] << 8) + rcvd_msg[3];
-	uint16_t data3 = (rcvd_msg[4] << 8) + rcvd_msg[5];
-	uint16_t data4 = (rcvd_msg[6] << 8) + rcvd_msg[7];
-
 	char encodedData[ENCODED_CAN_SIZE_BYTES];
 
 	// consider writing raw bytes
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
-			"(%010ld) X %08lX#%04X%04X%04X%04X\n", HAL_GetTick(),
-			RxHeader.ExtId, data1, data2, data3, data4);
+			"(%010ld)%08lX#%02X%02X%02X%02X%02X%02X%02X%02X\n",
+			HAL_GetTick(),
+			RxHeader.ExtId,
+			rcvd_msg[0], rcvd_msg[1], rcvd_msg[2], rcvd_msg[3],
+			rcvd_msg[4], rcvd_msg[5], rcvd_msg[6], rcvd_msg[7]);
 
 	strcat(current_buffer ? data_buffer[1] : data_buffer[0], encodedData);
 	buffer_fill_level[current_buffer]++;

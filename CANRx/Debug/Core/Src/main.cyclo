@@ -8,8 +8,8 @@
 ../Core/Src/main.c:712:13:MX_GPIO_Init	1
 ../Core/Src/main.c:796:22:INIT_PERIPHERALS	7
 ../Core/Src/main.c:869:6:Get_and_Append_CAN_Message_to_Buffer	3
-../Core/Src/main.c:897:19:CAN_Filter_Config	1
-../Core/Src/main.c:918:22:CREATE_NEW_LOG	8
-../Core/Src/main.c:996:6:HAL_CAN_RxFifo0MsgPendingCallback	4
-../Core/Src/main.c:1019:1:__io_putchar	1
-../Core/Src/main.c:1033:6:Error_Handler	1
+../Core/Src/main.c:895:19:CAN_Filter_Config	1
+../Core/Src/main.c:916:22:CREATE_NEW_LOG	8
+../Core/Src/main.c:994:6:HAL_CAN_RxFifo0MsgPendingCallback	4
+../Core/Src/main.c:1017:1:__io_putchar	1
+../Core/Src/main.c:1031:6:Error_Handler	1
