@@ -27,12 +27,13 @@ FIL SDFile;       /* File object for SD */
 
 /* USER CODE END Variables */
 
-void MX_FATFS_Init(void)
+uint8_t MX_FATFS_Init(void)
 {
   /*## FatFS: Link the SD driver ###########################*/
   retSD = FATFS_LinkDriver(&SD_Driver, SDPath);
 
   /* USER CODE BEGIN Init */
+  return retSD;
   /* additional user code for init */
   /* USER CODE END Init */
 }

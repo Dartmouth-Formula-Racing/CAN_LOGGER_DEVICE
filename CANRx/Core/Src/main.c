@@ -41,7 +41,7 @@
 /* USER CODE BEGIN PM */
 
 #define VERBOSE_DEBUGGING
-
+#define DEFAULT_RETRIES 3
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -56,6 +56,20 @@ DMA_HandleTypeDef hdma_sdmmc1_tx;
 UART_HandleTypeDef huart3;
 
 /* USER CODE BEGIN PV */
+//Errors of our CAN DECODER
+typedef enum {
+	SD_CARD_MISSING,
+	DMA_INIT_FAILED,
+	SDMMC_INIT_FAILED,
+	FATFS_INIT_FAILED,
+	CAN_FILTER_CONFIG_FAILED,
+	HAL_CAN_START_FAILED,
+	SD_MOUNTING_FAILED,
+	PERIPHERAL_INIT_SUCCESSFUL,
+	LOG_CREATION_SUCCESSFUL,
+	DATA_DIRECTORY_CREATION_UNSUCCESSFUL,
+	NEW_LOG_FILE_CREATION_FAILED
+} CANRX_ERROR_T;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -63,12 +77,13 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
 static void MX_CAN1_Init(void);
-static void MX_SDMMC1_SD_Init(void);
+static HAL_StatusTypeDef MX_SDMMC1_SD_Init(void);
 static void MX_USART3_UART_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 static HAL_StatusTypeDef CAN_Filter_Config(void);
-
+static CANRX_ERROR_T INIT_PERIPHERALS(void);
+static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 41
 #define CAN_MESSAGES_TO_BUFFER 100
@@ -97,6 +112,8 @@ uint8_t curr_hour;
 uint8_t curr_minute;
 uint8_t curr_second;
 uint32_t starting_tick;
+
+
 
 /* USER CODE END 0 */
 
@@ -127,17 +144,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_DMA_Init();
   MX_CAN1_Init();
-  MX_SDMMC1_SD_Init();
   MX_USART3_UART_Init();
-  MX_FATFS_Init();
   MX_USB_DEVICE_Init();
   MX_I2C1_Init();
+  MX_DMA_Init();
   /* USER CODE BEGIN 2 */
   DS1307_Init(&hi2c1);
-
-
 
 	//States of our CAN DECODER
 	typedef enum {
@@ -163,7 +176,7 @@ int main(void)
 	uint32_t buffer_emptyings = 0;
 	uint32_t total_size = 0;
 #endif
-
+	uint8_t writing_failed = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -188,9 +201,6 @@ int main(void)
 		 * 	else (power switch is set to off) -> POWER_OFF
 		 */
 		case TURN_ON:
-			MX_DMA_Init();
-			MX_SDMMC1_SD_Init();
-			MX_FATFS_Init();
 			POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
 			state = POWER_STATE ? PERIPHERAL_INIT : POWER_OFF;
 			NEW_LOG_FLAG = 0;
@@ -215,41 +225,15 @@ int main(void)
 			buffer_fill_level[1] = 0;
 			current_buffer = 0;
 
-			// Turn Red LED on (Green turns off)
-#ifdef VERBOSE_DEBUGGING
-			printf("Initializing Peripherals...\r\n");
-#endif
-			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET); //Red LED
-
-			// Initializing CAN
-			if (HAL_CAN_Start(&hcan1) != HAL_OK) {
-#ifdef VERBOSE_DEBUGGING
-				printf("CAN could not start.\r\n");
-#endif
-				Error_Handler();
+			CANRX_ERROR_T ERROR_CODE = INIT_PERIPHERALS();
+			if (ERROR_CODE != PERIPHERAL_INIT_SUCCESSFUL) {
+				HAL_Delay(1000);
+				state = TURN_ON;
+				break;
 			}
-			if (CAN_Filter_Config() != HAL_OK) {
-#ifdef VERBOSE_DEBUGGING
-				printf("CAN filter failed to set.\r\n");
-#endif
-				Error_Handler();
+			else {
+				state = CREATE_LOG_FILE;
 			}
-#ifdef VERBOSE_DEBUGGING
-			printf("CAN initialization succeeded...\r\n");
-#endif
-
-			// Mount and Format SD Card
-			if (f_mount(&SDFatFS, SDPath, 0) != FR_OK) {
-#ifdef VERBOSE_DEBUGGING
-				printf("Mounting failed!\r\n");
-#endif
-				Error_Handler();
-			}
-#ifdef VERBOSE_DEBUGGING
-			printf("SD initialization succeeded...\r\n");
-#endif
-
-			state = CREATE_LOG_FILE;
 			break;
 
 
@@ -268,51 +252,10 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 			printf("Creating new log file...\r\n");
 #endif
-
-			// Update current date/time info
-			curr_date = DS1307_GetDate();
-			curr_month = DS1307_GetMonth();
-			curr_year = DS1307_GetYear();
-			curr_hour = DS1307_GetHour();
-			curr_minute = DS1307_GetMinute();
-			curr_second = DS1307_GetSecond();
-			starting_tick = HAL_GetTick();
-#ifdef VERBOSE_DEBUGGING
-			printf("%02d/%02d/20%02d %02d:%02d:%02d\r\n",
-					curr_month, curr_date, curr_year, curr_hour, curr_minute, curr_second);
-#endif
-			if (f_stat(data_directory, &fno) != FR_OK) {
-				if (f_mkdir(data_directory) != FR_OK) {
-#ifdef VERBOSE_DEBUGGING
-					printf("Data directory not present and failed to create it.");
-#endif
-					Error_Handler();
-				}
+			if (CREATE_NEW_LOG() != LOG_CREATION_SUCCESSFUL) {
+				state = RESET_STATE;
+				break;
 			}
-
-			// Creating new filename
-			TCHAR filename[FILENAME_MAX_BYTES];
-			snprintf(filename, FILENAME_MAX_BYTES, "%s/%02d-%02d-20%02d_(%02dh-%02dm-%02ds).log",
-					data_directory,
-					curr_month, curr_date, curr_year,
-					curr_hour, curr_minute, curr_second);
-
-#ifdef VERBOSE_DEBUGGING
-			printf("New log name: %s \r\n", filename);
-#endif
-
-			// Open file for writing (Create)
-			if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
-					!= FR_OK) {
-#ifdef VERBOSE_DEBUGGING
-				printf("Failed to create new log file: %s ...!\r\n", filename);
-#endif
-				Error_Handler();
-			}
-#ifdef VERBOSE_DEBUGGING
-			printf("Successfully created new log file: %s ...\r\n", filename);
-#endif
-
 			// Starting CANRx interrupts
 			if (HAL_CAN_ActivateNotification(&hcan1,
 					CAN_IT_RX_FIFO0_MSG_PENDING) != HAL_OK) {
@@ -320,7 +263,8 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 				printf("Failed to activate CAN\r\n");
 #endif
-				Error_Handler();
+				state = RESET_STATE;
+				break;
 			}
 
 			// Turn Green LED on (turns Red LED off)
@@ -328,19 +272,20 @@ int main(void)
 			printf("Ready to receive messages!\r\n");
 #endif
 
-			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_SET); // Successful LED
-
 			// purge FIFO in case there are old messages
 			while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) != 0) {
 				CAN_RxHeaderTypeDef RxHeader;
 				uint8_t rcvd_msg[8];
 				if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
 #ifdef VERBOSE_DEBUGGING
-						printf("Failed to get CAN message\r\n");
+						printf("Failed to initialize CAN FIFO\r\n");
 #endif
-						Error_Handler();
+						state = RESET_STATE;
+						break;
 					}
 			}
+
+			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_SET); // Successful LED
 
 			state = STANDBY;
 			break;
@@ -387,15 +332,30 @@ int main(void)
 #ifdef VERBOSE_DEBUGGING
 				printf("Writing Failed!\r\n");
 #endif
-				Error_Handler();
+				writing_failed++;
+				if (writing_failed == 3) {
+#ifdef VERBOSE_DEBUGGING
+					printf("Writing Failed 3 Consecutive Times. Rebooting...\r\n");
+#endif
+					state = RESET_STATE;
+					break;
+				}
+				if(HAL_GPIO_ReadPin(SD_DETECT_GPIO_PORT, SD_DETECT_PIN) != GPIO_PIN_SET)
+			    {
+#ifdef VERBOSE_DEBUGGING
+						printf("SD Card Missing.\r\n");
+#endif
+						state = RESET_STATE;
+						break;
+			    }
+
 			}
 			if (f_sync(&SDFile) != FR_OK) {
 #ifdef VERBOSE_DEBUGGING
 				printf("Sync Failed!\r\n");
 #endif
-				Error_Handler();
 			}
-
+			writing_failed = 0;
 			state = USB_TRANSMIT;
 			break;
 
@@ -487,9 +447,8 @@ int main(void)
 				printf("Turning off!\r\n");
 #endif
 			}
-			else {
-				state = TURN_ON; // button was pressed
-			}
+
+			state = TURN_ON; // button was pressed
 			break;
 
 		/**
@@ -528,7 +487,6 @@ int main(void)
 	return 0;
 
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
@@ -669,7 +627,7 @@ static void MX_I2C1_Init(void)
   * @param None
   * @retval None
   */
-static void MX_SDMMC1_SD_Init(void)
+static HAL_StatusTypeDef MX_SDMMC1_SD_Init(void)
 {
 
   /* USER CODE BEGIN SDMMC1_Init 0 */
@@ -687,9 +645,7 @@ static void MX_SDMMC1_SD_Init(void)
   hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_ENABLE;
   hsd1.Init.ClockDiv = 0;
   /* USER CODE BEGIN SDMMC1_Init 2 */
-	if (HAL_SD_Init(&hsd1) != HAL_OK) {
-		Error_Handler();
-	}
+  return HAL_SD_Init(&hsd1);
   /* USER CODE END SDMMC1_Init 2 */
 
 }
@@ -836,6 +792,80 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+static CANRX_ERROR_T INIT_PERIPHERALS(void) {
+#ifdef VERBOSE_DEBUGGING
+	printf("Initializing Peripherals...\r\n");
+#endif
+
+	 if(HAL_GPIO_ReadPin(SD_DETECT_GPIO_PORT, SD_DETECT_PIN) != GPIO_PIN_SET)
+    {
+#ifdef VERBOSE_DEBUGGING
+		 printf("SD Card Missing.\r\n");
+#endif
+        return SD_CARD_MISSING;
+    }
+
+//	if (MX_DMA_Init() != HAL_OK) {
+//#ifdef VERBOSE_DEBUGGING
+//		 printf("DMA Initialization Failed.\r\n");
+//#endif
+//		return DMA_INIT_FAILED;
+//	}
+//#ifdef VERBOSE_DEBUGGING
+//		 printf("DMA Initialization Successful.\r\n");
+//#endif
+
+	if (MX_SDMMC1_SD_Init() != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
+		 printf("SDMMC Initialization Failed.\r\n");
+#endif
+		return SDMMC_INIT_FAILED;
+	}
+#ifdef VERBOSE_DEBUGGING
+		 printf("SDMMC Initialization Successful.\r\n");
+#endif
+
+	if (!MX_FATFS_Init()) {
+#ifdef VERBOSE_DEBUGGING
+		 printf("FATFS Initialization Failed.\r\n");
+#endif
+		return FATFS_INIT_FAILED;
+	}
+#ifdef VERBOSE_DEBUGGING
+		 printf("FATFS Initialization Successful.\r\n");
+#endif
+	// Initializing CAN
+	if (HAL_CAN_Start(&hcan1) != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
+		printf("CAN could not start.\r\n");
+#endif
+		return HAL_CAN_START_FAILED;
+	}
+	if (CAN_Filter_Config() != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
+		printf("CAN filter failed to set.\r\n");
+#endif
+		return CAN_FILTER_CONFIG_FAILED;
+	}
+#ifdef VERBOSE_DEBUGGING
+	printf("CAN initialization succeeded...\r\n");
+#endif
+
+	// Mount and Format SD Card
+	if (f_mount(&SDFatFS, SDPath, 1) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+		printf("Mounting failed!\r\n");
+#endif
+		return SD_MOUNTING_FAILED;
+	}
+#ifdef VERBOSE_DEBUGGING
+		printf("SD Mounting Successful...\r\n");
+#endif
+
+	return PERIPHERAL_INIT_SUCCESSFUL;
+}
+
 void Get_and_Append_CAN_Message_to_Buffer() {
 	CAN_RxHeaderTypeDef RxHeader;
 	uint8_t rcvd_msg[8];
@@ -883,6 +913,84 @@ HAL_StatusTypeDef CAN_Filter_Config(void) {
 	filter.FilterActivation = ENABLE;
 
 	return HAL_CAN_ConfigFilter(&hcan1, &filter);
+}
+
+static CANRX_ERROR_T CREATE_NEW_LOG(void) {
+
+	// Update current date/time info
+	curr_date = DS1307_GetDate();
+	curr_month = DS1307_GetMonth();
+	curr_year = DS1307_GetYear();
+	curr_hour = DS1307_GetHour();
+	curr_minute = DS1307_GetMinute();
+	curr_second = DS1307_GetSecond();
+	starting_tick = HAL_GetTick();
+
+#ifdef VERBOSE_DEBUGGING
+	printf("Starting new log at %02d-%02d-20%02dT%02d:%02d:%02dZ\r\n",
+			curr_year, curr_month, curr_date, curr_hour, curr_minute, curr_second);
+#endif
+	if (f_stat(data_directory, &fno) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+		printf("/CAN_DATA directory not present attempting to create it...\n\r");
+#endif
+		uint8_t RETRY_COUNT = 0;
+		while (RETRY_COUNT < DEFAULT_RETRIES) {
+			if (f_mkdir(data_directory) != FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+				printf("Failed to create /CAN_DATA Directory. Retrying...\n\r");
+#endif
+				RETRY_COUNT++;
+			}
+			else {
+#ifdef VERBOSE_DEBUGGING
+				printf("Successfully created /CAN_DATA Directory\n\r");
+#endif
+				break;
+			}
+		}
+		if (RETRY_COUNT == 3) {
+#ifdef VERBOSE_DEBUGGING
+			printf("Unable to create /CAN_DATA Directory\n\r");
+#endif
+			return DATA_DIRECTORY_CREATION_UNSUCCESSFUL;
+		}
+	}
+
+	// Creating new filename
+	TCHAR filename[FILENAME_MAX_BYTES];
+	snprintf(filename, FILENAME_MAX_BYTES, "%s/%02d-%02d-20%02dT%02d-%02d-%02dZ.log",
+			data_directory,
+			curr_month, curr_date, curr_year,
+			curr_hour, curr_minute, curr_second);
+
+#ifdef VERBOSE_DEBUGGING
+	printf("New log name: %s \r\n", filename);
+#endif
+	uint8_t RETRY_COUNT = 0;
+	while (RETRY_COUNT < DEFAULT_RETRIES) {
+		RETRY_COUNT++;
+	// Open file for writing (Create)
+		if (f_open(&SDFile, filename, FA_CREATE_ALWAYS | FA_WRITE)
+				!= FR_OK) {
+#ifdef VERBOSE_DEBUGGING
+			printf("Failed to create new log file: %s. Retrying...!\r\n", filename);
+#endif
+		}
+		else {
+			break;
+		}
+	}
+	if (RETRY_COUNT == 3) {
+#ifdef VERBOSE_DEBUGGING
+		printf("Failed to create new log file: %s\r\n", filename);
+#endif
+		return NEW_LOG_FILE_CREATION_FAILED;
+	}
+#ifdef VERBOSE_DEBUGGING
+	printf("Successfully created new log file: %s ...\r\n", filename);
+#endif
+	return LOG_CREATION_SUCCESSFUL;
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {

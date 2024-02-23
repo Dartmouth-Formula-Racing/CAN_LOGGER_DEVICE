@@ -36,7 +36,7 @@ extern char SDPath[4]; /* SD logical drive path */
 extern FATFS SDFatFS; /* File system object for SD logical drive */
 extern FIL SDFile; /* File object for SD */
 
-void MX_FATFS_Init(void);
+uint8_t MX_FATFS_Init(void);
 
 /* USER CODE BEGIN Prototypes */
 
