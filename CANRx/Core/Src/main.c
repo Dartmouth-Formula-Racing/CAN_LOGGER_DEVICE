@@ -25,6 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include "usbd_cdc_if.h"
 #include "ds1307_for_stm32_hal.h"
+#include "inttypes.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +43,7 @@
 
 #define VERBOSE_DEBUGGING
 #define DEFAULT_RETRIES 3
+//#define SET_RTC_TIME
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -85,8 +87,8 @@ static HAL_StatusTypeDef CAN_Filter_Config(void);
 static CANRX_ERROR_T INIT_PERIPHERALS(void);
 static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#define ENCODED_CAN_SIZE_BYTES 38
-#define CAN_MESSAGES_TO_BUFFER 100
+#define ENCODED_CAN_SIZE_BYTES 37
+#define CAN_MESSAGES_TO_BUFFER 512
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
@@ -101,18 +103,20 @@ const char *data_directory = "/CAN_DATA";
 uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
 char data_buffer[2][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
-uint8_t buffer_fill_level[2];
+uint16_t buffer_fill_level[2];
 uint8_t current_buffer;
 uint8_t is_buffer_filled = 0;
-
-uint8_t curr_date;
-uint8_t curr_month;
-uint8_t curr_year;
-uint8_t curr_hour;
-uint8_t curr_minute;
-uint8_t curr_second;
-uint32_t starting_tick;
-
+/**
+ * Not used, but previously used for getting milliseconds since epoch
+ */
+//uint8_t curr_date;
+//uint8_t curr_month;
+//uint8_t curr_year;
+//uint8_t curr_hour;
+//uint8_t curr_minute;
+//uint8_t curr_second;
+//uint32_t starting_tick;
+//uint64_t starting_timestamp_ms;
 
 
 /* USER CODE END 0 */
@@ -151,6 +155,59 @@ int main(void)
   MX_DMA_Init();
   /* USER CODE BEGIN 2 */
   DS1307_Init(&hi2c1);
+
+#ifdef SET_RTC_TIME
+  /**
+   * @brief Sets the current day of week.
+   * @param dayOfWeek Days since last Sunday, 0 to 6.
+   */
+  DS1307_SetDayOfWeek(1);
+
+  /**
+   * @brief Sets the current day of month.
+   * @param date Day of month, 1 to 31.
+   */
+  DS1307_SetDate(26);
+
+  /**
+   * @brief Sets the current month.
+   * @param month Month, 1 to 12.
+   */
+  DS1307_SetMonth(2);
+
+  /**
+   * @brief Sets the current year.
+   * @param year Year, 2000 to 2099.
+   */
+  DS1307_SetYear(24);
+
+  /**
+   * @brief Sets the current hour, in 24h format.
+   * @param hour_24mode Hour in 24h format, 0 to 23.
+   */
+  DS1307_SetHour(23);
+
+  /**
+   * @brief Sets the current minute.
+   * @param minute Minute, 0 to 59.
+   */
+  DS1307_SetMinute(7);
+
+  /**
+   * @brief Sets the current second.
+   * @param second Second, 0 to 59.
+   */
+  DS1307_SetSecond(30);
+
+  /**
+   * @brief Sets UTC offset.
+   * @note  UTC offset is not updated automatically.
+   * @param hr UTC hour offset, -12 to 12.
+   * @param min UTC minute offset, 0 to 59.
+   */
+  DS1307_SetTimeZone(0, 0);
+
+#endif
 
 	//States of our CAN DECODER
 	typedef enum {
@@ -878,17 +935,19 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 		Error_Handler();
 	}
 
+//	uint64_t curr_timestamp_ms = starting_timestamp_ms + ((uint64_t) (HAL_GetTick() - starting_tick));
+
 	char encodedData[ENCODED_CAN_SIZE_BYTES];
 
 	// consider writing raw bytes
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
-			"(%010ld)%08lX#%02X%02X%02X%02X%02X%02X%02X%02X\n",
+			"%010ld#%08lX#%02X%02X%02X%02X%02X%02X%02X%02X\n",
 			HAL_GetTick(),
 			RxHeader.ExtId,
 			rcvd_msg[0], rcvd_msg[1], rcvd_msg[2], rcvd_msg[3],
 			rcvd_msg[4], rcvd_msg[5], rcvd_msg[6], rcvd_msg[7]);
 
-	strcat(current_buffer ? data_buffer[1] : data_buffer[0], encodedData);
+	strcat(data_buffer[current_buffer], encodedData);
 	buffer_fill_level[current_buffer]++;
 }
 
@@ -913,16 +972,67 @@ HAL_StatusTypeDef CAN_Filter_Config(void) {
 	return HAL_CAN_ConfigFilter(&hcan1, &filter);
 }
 
+/**
+ * Not used, but previously used for getting milliseconds since epoch
+ */
+//uint64_t get_total_days_this_year(uint8_t year, uint8_t month, uint8_t day) {
+//	uint64_t total_days = day;
+//
+//	// months that have passed
+//	if (month > 1) total_days += 31; // january
+//	if (month > 2) total_days += 28; // february, handle leap days separately
+//	if (month > 3) total_days += 31; // march
+//	if (month > 4) total_days += 30; // april
+//	if (month > 5) total_days += 31; // may
+//	if (month > 6) total_days += 30; // june
+//	if (month > 7) total_days += 31; // july
+//	if (month > 8) total_days += 31; // august
+//	if (month > 9) total_days += 30; // september
+//	if (month > 10) total_days += 31; // october
+//	if (month > 11) total_days += 30; // november
+//
+//	// 2000 divides 4, 100, and 400 so this is fine
+//	if (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) && month > 2) total_days++;
+//
+//	return total_days;
+//}
+//
+//uint64_t get_leap_days_from_previous_years(uint8_t year) {
+//	uint64_t prev_year = ((uint64_t) year) + 2000 - 1;
+//
+//	// After the year 2100, this is off by one day, but we ignore that...
+//	return ((prev_year - 1972) / 4) + 1;
+//}
+
 static CANRX_ERROR_T CREATE_NEW_LOG(void) {
 
 	// Update current date/time info
-	curr_date = DS1307_GetDate();
-	curr_month = DS1307_GetMonth();
-	curr_year = DS1307_GetYear();
-	curr_hour = DS1307_GetHour();
-	curr_minute = DS1307_GetMinute();
-	curr_second = DS1307_GetSecond();
-	starting_tick = HAL_GetTick();
+	uint8_t curr_date = DS1307_GetDate();
+	uint8_t curr_month = DS1307_GetMonth();
+	uint8_t curr_year = DS1307_GetYear();
+	uint8_t curr_hour = DS1307_GetHour();
+	uint8_t curr_minute = DS1307_GetMinute();
+	uint8_t curr_second = DS1307_GetSecond();
+//	uint8_t starting_tick = HAL_GetTick();
+
+
+	/**
+	 * Not used, but previously used for getting milliseconds since epoch
+	 */
+//	uint64_t complete_years_since_1970 = ((uint64_t) curr_year) + 2000 - 1970;
+//
+//	// first in seconds
+//	uint64_t starting_timestamp_sec = (uint64_t) curr_second + // seconds
+//			((uint64_t) curr_minute)*60 + // minutes
+//			((uint64_t) curr_hour)*3600 + // hours
+//			(get_total_days_this_year(curr_year, curr_month, curr_date))*86400 + // days this year
+//			complete_years_since_1970*31536000 + // years completed since 1970
+//			get_leap_days_from_previous_years(curr_year) * 86400 +
+//			4 * 3600; // add 4 hours to go from EDT to UTC
+//
+//
+//	// now in milliseconds
+//	starting_timestamp_ms = starting_timestamp_sec * 1000 + ((uint64_t) (starting_tick - HAL_GetTick()));
 
 #ifdef VERBOSE_DEBUGGING
 	printf("Starting new log at %02d-%02d-20%02dT%02d:%02d:%02dZ\r\n",
@@ -957,9 +1067,9 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void) {
 
 	// Creating new filename
 	TCHAR filename[FILENAME_MAX_BYTES];
-	snprintf(filename, FILENAME_MAX_BYTES, "%s/%02d-%02d-20%02dT%02d-%02d-%02dZ.log",
+	snprintf(filename, FILENAME_MAX_BYTES, "%s/20%02d-%02d-%02dT%02d-%02d-%02dZ.log",
 			data_directory,
-			curr_month, curr_date, curr_year,
+			curr_year, curr_month, curr_date,
 			curr_hour, curr_minute, curr_second);
 
 #ifdef VERBOSE_DEBUGGING
@@ -996,16 +1106,27 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
 			&& buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
 	{
 #ifdef VERBOSE_DEBUGGING
-		printf("Buffers are full\r\n");
+		printf("Buffers are full... passing message\r\n");
 #endif
 		Error_Handler();
+//		CAN_RxHeaderTypeDef RxHeader;
+//		uint8_t rcvd_msg[8];
+//
+//		if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
+//				!= HAL_OK){
+//	#ifdef VERBOSE_DEBUGGING
+//			printf("Failed to get CAN message\r\n");
+//	#endif
+//			Error_Handler();
+//		}
 	}
+	else {
+		Get_and_Append_CAN_Message_to_Buffer();
 
-	Get_and_Append_CAN_Message_to_Buffer();
-
-	if (buffer_fill_level[current_buffer] == CAN_MESSAGES_TO_BUFFER) {
-		is_buffer_filled = 1;
-		current_buffer = !current_buffer;
+		if (buffer_fill_level[current_buffer] == CAN_MESSAGES_TO_BUFFER) {
+			is_buffer_filled = 1;
+			current_buffer = !current_buffer;
+		}
 	}
 }
 
