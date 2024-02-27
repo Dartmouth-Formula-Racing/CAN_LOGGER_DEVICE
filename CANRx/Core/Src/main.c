@@ -104,8 +104,9 @@ uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
 char data_buffer[2][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
 uint16_t buffer_fill_level[2];
-uint8_t current_buffer;
+uint8_t buffer_writing_to;
 uint8_t is_buffer_filled = 0;
+uint8_t CAN_notifications_deactivated = 0;
 /**
  * Not used, but previously used for getting milliseconds since epoch
  */
@@ -229,10 +230,6 @@ int main(void)
 	//Starting state is PERIPHERAL_INIT
 	state_t state = TURN_ON;
 	uint32_t byteswritten; /* File write/read counts */
-#ifdef VERBOSE_DEBUGGING
-	uint32_t buffer_emptyings = 0;
-	uint32_t total_size = 0;
-#endif
 	uint8_t writing_failed = 0;
   /* USER CODE END 2 */
 
@@ -280,7 +277,7 @@ int main(void)
 			data_buffer[1][0] = '\00';
 			buffer_fill_level[0] = 0;
 			buffer_fill_level[1] = 0;
-			current_buffer = 0;
+			buffer_writing_to = 0;
 
 			CANRX_ERROR_T ERROR_CODE = INIT_PERIPHERALS();
 			if (ERROR_CODE != PERIPHERAL_INIT_SUCCESSFUL) {
@@ -385,7 +382,7 @@ int main(void)
 		 *	Always -> USB_TRANSMIT
 		 */
 		case SD_CARD_WRITE:
-			if (f_write(&SDFile, data_buffer[!current_buffer], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
+			if (f_write(&SDFile, data_buffer[!buffer_writing_to], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
 #ifdef VERBOSE_DEBUGGING
 				printf("Writing Failed!\r\n");
 #endif
@@ -431,7 +428,7 @@ int main(void)
 		 *	Always -> RESET_BUFFER
 		 */
 		case USB_TRANSMIT:
-			CDC_Transmit_FS(data_buffer[!current_buffer], BUFFER_TOTAL_SIZE);
+			CDC_Transmit_FS(data_buffer[!buffer_writing_to], BUFFER_TOTAL_SIZE);
 			state = RESET_BUFFER;
 			break;
 
@@ -450,18 +447,18 @@ int main(void)
 		 *	Always -> STANDBY
 		 */
 		case RESET_BUFFER:
-			// bookkeeping information (just for debugging)
-#ifdef VERBOSE_DEBUGGING
-			buffer_emptyings++;
-			total_size += byteswritten;
-//			printf("emptied buffer %d\r\n", !current_buffer);
-//			printf("buffers emptied: %ld\r\n", buffer_emptyings);
-//			printf("Wrote buffer sizeof: %ld\r\n", byteswritten);
-#endif
 			// Reset buffer that was just sent to SD and USB
-			data_buffer[!current_buffer][0] = '\00';
-			buffer_fill_level[!current_buffer] = 0;
+			data_buffer[!buffer_writing_to][0] = '\00';
+			buffer_fill_level[!buffer_writing_to] = 0;
 			is_buffer_filled = 0;
+
+			if (CAN_notifications_deactivated) {
+#ifdef VERBOSE_DEBUGGING
+				printf("Resuming receive...\r\n");
+#endif
+				CAN_notifications_deactivated = 0;
+				HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+			}
 
 			byteswritten = 0;
 
@@ -488,13 +485,6 @@ int main(void)
 			// Turn Red LED on (Green LED turns off)
 			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET); //Red LED
 
-#ifdef VERBOSE_DEBUGGING
-			// Debugging information
-			printf("total sizeof: %ld\r\n", total_size);
-			total_size = 0;
-			buffer_emptyings = 0;
-			printf("Unmounting SD Card!\r\n");
-#endif
 			f_close(&SDFile);
 			f_mount(0, (TCHAR const*) NULL, 0);
 
@@ -947,8 +937,8 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 			rcvd_msg[0], rcvd_msg[1], rcvd_msg[2], rcvd_msg[3],
 			rcvd_msg[4], rcvd_msg[5], rcvd_msg[6], rcvd_msg[7]);
 
-	strcat(data_buffer[current_buffer], encodedData);
-	buffer_fill_level[current_buffer]++;
+	strcat(data_buffer[buffer_writing_to], encodedData);
+	buffer_fill_level[buffer_writing_to]++;
 }
 
 HAL_StatusTypeDef CAN_Filter_Config(void) {
@@ -1102,30 +1092,21 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void) {
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	if (buffer_fill_level[0] == CAN_MESSAGES_TO_BUFFER
-			&& buffer_fill_level[1] == CAN_MESSAGES_TO_BUFFER)
+	if (buffer_fill_level[!buffer_writing_to] == CAN_MESSAGES_TO_BUFFER
+			&& buffer_fill_level[buffer_writing_to] == (CAN_MESSAGES_TO_BUFFER-1))
 	{
 #ifdef VERBOSE_DEBUGGING
-		printf("Buffers are full... passing message\r\n");
+		printf("Buffers are full... passing messages\r\n");
 #endif
-		Error_Handler();
-//		CAN_RxHeaderTypeDef RxHeader;
-//		uint8_t rcvd_msg[8];
-//
-//		if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg)
-//				!= HAL_OK){
-//	#ifdef VERBOSE_DEBUGGING
-//			printf("Failed to get CAN message\r\n");
-//	#endif
-//			Error_Handler();
-//		}
+		CAN_notifications_deactivated = 1;
+		HAL_CAN_DeactivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 	}
 	else {
 		Get_and_Append_CAN_Message_to_Buffer();
 
-		if (buffer_fill_level[current_buffer] == CAN_MESSAGES_TO_BUFFER) {
+		if (buffer_fill_level[buffer_writing_to] == CAN_MESSAGES_TO_BUFFER) {
 			is_buffer_filled = 1;
-			current_buffer = !current_buffer;
+			buffer_writing_to = !buffer_writing_to;
 		}
 	}
 }
