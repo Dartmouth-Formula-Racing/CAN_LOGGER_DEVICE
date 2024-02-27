@@ -88,9 +88,10 @@ static CANRX_ERROR_T INIT_PERIPHERALS(void);
 static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 37
-#define CAN_MESSAGES_TO_BUFFER 512
-#define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_TO_BUFFER
+#define CAN_MESSAGES_PER_BUFFER 512
+#define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_PER_BUFFER
 #define FILENAME_MAX_BYTES 256
+#define NUM_BUFFERS 8
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -102,11 +103,16 @@ const char *data_directory = "/CAN_DATA";
 
 uint8_t POWER_STATE;
 uint8_t NEW_LOG_FLAG;
-char data_buffer[2][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
-uint16_t buffer_fill_level[2];
+char data_buffer[NUM_BUFFERS][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
+uint16_t buffer_fill_level[NUM_BUFFERS];
 uint8_t buffer_writing_to;
-uint8_t is_buffer_filled = 0;
+uint8_t buffer_reading_from;
 uint8_t CAN_notifications_deactivated = 0;
+
+FRESULT fresult_rc;
+
+uint32_t tick_when_can_deactivated_last = 0;
+uint32_t total_ticks_with_can_deactivated = 0;
 /**
  * Not used, but previously used for getting milliseconds since epoch
  */
@@ -272,12 +278,18 @@ int main(void)
 		 * 	Always -> CREATE_LOG_FILE
 		 */
 		case PERIPHERAL_INIT:
+#ifdef VERBOSE_DEBUGGING
+			printf("Initializing with %d buffers storing %d messages\r\n", NUM_BUFFERS, CAN_MESSAGES_PER_BUFFER);
+#endif
 			// Reset both buffers
-			data_buffer[0][0] = '\00';
-			data_buffer[1][0] = '\00';
-			buffer_fill_level[0] = 0;
-			buffer_fill_level[1] = 0;
+			for (int buffer_num = 0; buffer_num < NUM_BUFFERS; buffer_num++) {
+				data_buffer[buffer_num][0] = '\00';
+				buffer_fill_level[buffer_num] = 0;
+			}
+
 			buffer_writing_to = 0;
+			buffer_reading_from = 0;
+			CAN_notifications_deactivated = 0;
 
 			CANRX_ERROR_T ERROR_CODE = INIT_PERIPHERALS();
 			if (ERROR_CODE != PERIPHERAL_INIT_SUCCESSFUL) {
@@ -360,7 +372,7 @@ int main(void)
 		case STANDBY:
 			if (!POWER_STATE || NEW_LOG_FLAG) //Power switch is off or new log file
 				state = RESET_STATE;
-			else if (is_buffer_filled) //Buffer is filled
+			else if (buffer_fill_level[buffer_reading_from] == CAN_MESSAGES_PER_BUFFER) //Buffer is filled
 				state = SD_CARD_WRITE;
 			break;
 
@@ -382,11 +394,12 @@ int main(void)
 		 *	Always -> USB_TRANSMIT
 		 */
 		case SD_CARD_WRITE:
-			if (f_write(&SDFile, data_buffer[!buffer_writing_to], BUFFER_TOTAL_SIZE, (void*) &byteswritten) != FR_OK || byteswritten == 0) {
+			if ((fresult_rc = f_write(&SDFile, data_buffer[buffer_reading_from], BUFFER_TOTAL_SIZE, (void*) &byteswritten)) != FR_OK || byteswritten == 0) {
 #ifdef VERBOSE_DEBUGGING
-				printf("Writing Failed!\r\n");
+				printf("Writing Failed with rc = %d\r\n", fresult_rc);
 #endif
 				writing_failed++;
+
 				if (writing_failed == 3) {
 #ifdef VERBOSE_DEBUGGING
 					printf("Writing Failed 3 Consecutive Times. Rebooting...\r\n");
@@ -394,6 +407,7 @@ int main(void)
 					state = RESET_STATE;
 					break;
 				}
+
 				if(HAL_GPIO_ReadPin(SD_DETECT_GPIO_PORT, SD_DETECT_PIN) != GPIO_PIN_SET)
 			    {
 #ifdef VERBOSE_DEBUGGING
@@ -403,12 +417,16 @@ int main(void)
 						break;
 			    }
 
+				break;
+
 			}
-			if (f_sync(&SDFile) != FR_OK) {
+
+			if ((fresult_rc = f_sync(&SDFile)) != FR_OK) {
 #ifdef VERBOSE_DEBUGGING
-				printf("Sync Failed!\r\n");
+				printf("Sync Failed with rc = %d!\r\n", fresult_rc);
 #endif
 			}
+
 			writing_failed = 0;
 			state = USB_TRANSMIT;
 			break;
@@ -428,7 +446,7 @@ int main(void)
 		 *	Always -> RESET_BUFFER
 		 */
 		case USB_TRANSMIT:
-			CDC_Transmit_FS(data_buffer[!buffer_writing_to], BUFFER_TOTAL_SIZE);
+			CDC_Transmit_FS(data_buffer[buffer_reading_from], BUFFER_TOTAL_SIZE);
 			state = RESET_BUFFER;
 			break;
 
@@ -448,14 +466,38 @@ int main(void)
 		 */
 		case RESET_BUFFER:
 			// Reset buffer that was just sent to SD and USB
-			data_buffer[!buffer_writing_to][0] = '\00';
-			buffer_fill_level[!buffer_writing_to] = 0;
-			is_buffer_filled = 0;
+			data_buffer[buffer_reading_from][0] = '\00';
+			buffer_fill_level[buffer_reading_from] = 0;
+			buffer_reading_from = (buffer_reading_from + 1) % NUM_BUFFERS;
+
+//			printf("------------------------------------------\r\n");
+//			for (int buff_num = 0; buff_num < NUM_BUFFERS; buff_num++) {
+//				printf("Buffer[%d]: %d\r\n", buff_num, buffer_fill_level[buff_num]);
+//			}
 
 			if (CAN_notifications_deactivated) {
 #ifdef VERBOSE_DEBUGGING
 				printf("Resuming receive...\r\n");
 #endif
+				// purge FIFO in case there are old messages
+				while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) != 0) {
+					CAN_RxHeaderTypeDef RxHeader;
+					uint8_t rcvd_msg[8];
+					if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
+#ifdef VERBOSE_DEBUGGING
+						printf("Failed to initialize CAN FIFO\r\n");
+#endif
+						state = RESET_STATE;
+						break;
+					}
+				}
+
+				total_ticks_with_can_deactivated += HAL_GetTick() - tick_when_can_deactivated_last;
+
+#ifdef VERBOSE_DEBUGGING
+				printf("Total ticks with CAN notifications deactivated: %ld\r\n", total_ticks_with_can_deactivated);
+#endif
+
 				CAN_notifications_deactivated = 0;
 				HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
 			}
@@ -927,7 +969,8 @@ void Get_and_Append_CAN_Message_to_Buffer() {
 
 //	uint64_t curr_timestamp_ms = starting_timestamp_ms + ((uint64_t) (HAL_GetTick() - starting_tick));
 
-	char encodedData[ENCODED_CAN_SIZE_BYTES];
+	// snprintf includes the null terminating string
+	char encodedData[ENCODED_CAN_SIZE_BYTES+1];
 
 	// consider writing raw bytes
 	snprintf(encodedData, ENCODED_CAN_SIZE_BYTES + 1,
@@ -1092,21 +1135,22 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void) {
 }
 
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan) {
-	if (buffer_fill_level[!buffer_writing_to] == CAN_MESSAGES_TO_BUFFER
-			&& buffer_fill_level[buffer_writing_to] == (CAN_MESSAGES_TO_BUFFER-1))
+	if (buffer_fill_level[buffer_writing_to] == (CAN_MESSAGES_PER_BUFFER-1)
+			&& buffer_fill_level[(buffer_writing_to + 1) % NUM_BUFFERS] == CAN_MESSAGES_PER_BUFFER)
 	{
 #ifdef VERBOSE_DEBUGGING
-		printf("Buffers are full... passing messages\r\n");
+		printf("\r\nBuffers are full... passing messages\r\n");
 #endif
 		CAN_notifications_deactivated = 1;
 		HAL_CAN_DeactivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+		tick_when_can_deactivated_last = HAL_GetTick();
 	}
 	else {
 		Get_and_Append_CAN_Message_to_Buffer();
 
-		if (buffer_fill_level[buffer_writing_to] == CAN_MESSAGES_TO_BUFFER) {
-			is_buffer_filled = 1;
-			buffer_writing_to = !buffer_writing_to;
+		if (buffer_fill_level[buffer_writing_to] == CAN_MESSAGES_PER_BUFFER) {
+			buffer_writing_to = (buffer_writing_to + 1) % NUM_BUFFERS;
 		}
 	}
 }
