@@ -10,6 +10,6 @@
 ../Core/Src/main.c:958:6:Get_and_Append_CAN_Message_to_Buffer	160	static
 ../Core/Src/main.c:987:19:CAN_Filter_Config	56	static
 ../Core/Src/main.c:1040:22:CREATE_NEW_LOG	320	static
-../Core/Src/main.c:1137:6:HAL_CAN_RxFifo0MsgPendingCallback	16	static
-../Core/Src/main.c:1163:1:__io_putchar	16	static
-../Core/Src/main.c:1177:6:Error_Handler	8	static,ignoring_inline_asm
+../Core/Src/main.c:1142:6:HAL_CAN_RxFifo0MsgPendingCallback	16	static
+../Core/Src/main.c:1168:1:__io_putchar	16	static
+../Core/Src/main.c:1182:6:Error_Handler	8	static,ignoring_inline_asm

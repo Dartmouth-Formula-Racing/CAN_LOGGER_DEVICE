@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<section name="Workbench">
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog">
+		<item key="selection" value="HAL_CAN_GetRxMessage"/>
+		<item key="wrap" value="true"/>
+		<item key="casesensitive" value="false"/>
+		<item key="wholeword" value="false"/>
+		<item key="incremental" value="false"/>
+		<item key="isRegEx" value="false"/>
+		<list key="findhistory">
+			<item value="HAL_CAN_GetRxMessage"/>
+			<item value="fill"/>
+			<item value="FIFO"/>
+			<item value="byteswritten"/>
+			<item value="delay"/>
+			<item value="NEW_LOG_FLAG"/>
+			<item value="POWER_STATE"/>
+			<item value="RESET_STATE"/>
+			<item value="\n\r"/>
+			<item value="tick"/>
+			<item value="SDFile"/>
+			<item value="writing failed"/>
+			<item value="writing"/>
+			<item value="printf("/>
+			<item value="printf(enc"/>
+		</list>
+		<list key="replacehistory">
+			<item value="\r\n"/>
+			<item value=""/>
+		</list>
+	</section>
+	<section name="org.eclipse.ui.texteditor.FindReplaceDialog_dialogBounds">
+		<item key="DIALOG_X_ORIGIN" value="763"/>
+		<item key="DIALOG_Y_ORIGIN" value="294"/>
+		<item key="DIALOG_WIDTH" value="336"/>
+		<item key="DIALOG_HEIGHT" value="402"/>
+		<item key="DIALOG_FONT_NAME" value="1|.AppleSystemUIFont|11.0|0|COCOA|1|.AppleSystemUIFont"/>
+	</section>
+</section>

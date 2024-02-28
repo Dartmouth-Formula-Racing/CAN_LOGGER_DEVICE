@@ -89,9 +89,9 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 37
 #define CAN_MESSAGES_PER_BUFFER 512
+#define NUM_BUFFERS 16
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_PER_BUFFER
 #define FILENAME_MAX_BYTES 256
-#define NUM_BUFFERS 8
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -168,13 +168,13 @@ int main(void)
    * @brief Sets the current day of week.
    * @param dayOfWeek Days since last Sunday, 0 to 6.
    */
-  DS1307_SetDayOfWeek(1);
+  DS1307_SetDayOfWeek(3);
 
   /**
    * @brief Sets the current day of month.
    * @param date Day of month, 1 to 31.
    */
-  DS1307_SetDate(26);
+  DS1307_SetDate(28);
 
   /**
    * @brief Sets the current month.
@@ -192,19 +192,19 @@ int main(void)
    * @brief Sets the current hour, in 24h format.
    * @param hour_24mode Hour in 24h format, 0 to 23.
    */
-  DS1307_SetHour(23);
+  DS1307_SetHour(3);
 
   /**
    * @brief Sets the current minute.
    * @param minute Minute, 0 to 59.
    */
-  DS1307_SetMinute(7);
+  DS1307_SetMinute(40);
 
   /**
    * @brief Sets the current second.
    * @param second Second, 0 to 59.
    */
-  DS1307_SetSecond(30);
+  DS1307_SetSecond(0);
 
   /**
    * @brief Sets UTC offset.
@@ -293,6 +293,7 @@ int main(void)
 
 			CANRX_ERROR_T ERROR_CODE = INIT_PERIPHERALS();
 			if (ERROR_CODE != PERIPHERAL_INIT_SUCCESSFUL) {
+				HAL_CAN_Stop(&hcan1);
 				HAL_Delay(1000);
 				state = TURN_ON;
 				break;
@@ -433,7 +434,6 @@ int main(void)
 
 		case SD_CARD_WRITE_ERROR:
 			break;
-
 		/**
 		 * State: USB_TRANSMIT
 		 *
@@ -446,7 +446,7 @@ int main(void)
 		 *	Always -> RESET_BUFFER
 		 */
 		case USB_TRANSMIT:
-			CDC_Transmit_FS(data_buffer[buffer_reading_from], BUFFER_TOTAL_SIZE);
+			CDC_Transmit_FS((uint8_t *) data_buffer[buffer_reading_from], BUFFER_TOTAL_SIZE);
 			state = RESET_BUFFER;
 			break;
 
@@ -1119,6 +1119,11 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void) {
 #endif
 		}
 		else {
+			// http://elm-chan.org/fsw/ff/doc/utime.html
+//			FILINFO date_time_info;
+//			date_time_info.fdate = (WORD)(((((WORD) curr_year) + 20) * 512U) | ((WORD) curr_month) * 32U | (WORD) curr_date);
+//			date_time_info.ftime = (WORD)(((WORD) curr_hour) * 2048U | ((WORD) curr_minute) * 32U | ((WORD) curr_second) / 2U);
+//			f_utime(filename, &date_time_info);
 			break;
 		}
 	}
