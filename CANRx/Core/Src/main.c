@@ -89,7 +89,7 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 37
 #define CAN_MESSAGES_PER_BUFFER 512
-#define NUM_BUFFERS 8
+#define NUM_BUFFERS 4
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_PER_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
@@ -156,11 +156,13 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_CAN1_Init();
+  MX_SDMMC1_SD_Init();
   MX_USART3_UART_Init();
+  MX_FATFS_Init();
   MX_USB_DEVICE_Init();
   MX_I2C1_Init();
-  MX_DMA_Init();
   /* USER CODE BEGIN 2 */
   DS1307_Init(&hi2c1);
 
@@ -348,7 +350,7 @@ int main(void)
 				uint8_t rcvd_msg[8];
 				if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
 #ifdef VERBOSE_DEBUGGING
-						printf("Failed to initialize CAN FIFO\r\n");
+						printf("Failed to get message despite message existing\r\n");
 #endif
 						state = RESET_STATE;
 						break;
@@ -473,10 +475,10 @@ int main(void)
 			buffer_fill_level[buffer_reading_from] = 0;
 			buffer_reading_from = (buffer_reading_from + 1) % NUM_BUFFERS;
 
-			printf("------------------------------------------\r\n");
-			for (int buff_num = 0; buff_num < NUM_BUFFERS; buff_num++) {
-				printf("Buffer[%d]: %d\r\n", buff_num, buffer_fill_level[buff_num]);
-			}
+//			printf("------------------------------------------\r\n");
+//			for (int buff_num = 0; buff_num < NUM_BUFFERS; buff_num++) {
+//				printf("Buffer[%d]: %d\r\n", buff_num, buffer_fill_level[buff_num]);
+//			}
 
 			if (CAN_notifications_deactivated) {
 #ifdef VERBOSE_DEBUGGING
@@ -488,7 +490,7 @@ int main(void)
 					uint8_t rcvd_msg[8];
 					if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &RxHeader, rcvd_msg) != HAL_OK) {
 #ifdef VERBOSE_DEBUGGING
-						printf("Failed to initialize CAN FIFO\r\n");
+						printf("Failed to get message despite message existing\r\n");
 #endif
 						state = RESET_STATE;
 						break;
@@ -583,6 +585,7 @@ int main(void)
 	return 0;
 
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
   /* USER CODE END 3 */
 }
@@ -739,7 +742,7 @@ static HAL_StatusTypeDef MX_SDMMC1_SD_Init(void)
   hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
   hsd1.Init.BusWide = SDMMC_BUS_WIDE_1B;
   hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_ENABLE;
-  hsd1.Init.ClockDiv = 0;
+  hsd1.Init.ClockDiv = 3;
   /* USER CODE BEGIN SDMMC1_Init 2 */
   return HAL_SD_Init(&hsd1);
   /* USER CODE END SDMMC1_Init 2 */
