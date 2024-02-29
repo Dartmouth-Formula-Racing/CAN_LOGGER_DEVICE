@@ -60,8 +60,9 @@ extern DMA_HandleTypeDef hdma_sdmmc1_rx;
 extern DMA_HandleTypeDef hdma_sdmmc1_tx;
 extern SD_HandleTypeDef hsd1;
 /* USER CODE BEGIN EV */
-extern uint8_t POWER_STATE;
+extern uint8_t POWER_SWITCH_PIN;
 extern uint8_t NEW_LOG_FLAG;
+extern uint8_t POWER_OKAY;
 
 /* USER CODE END EV */
 
@@ -209,7 +210,7 @@ void SysTick_Handler(void)
 void EXTI1_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI1_IRQn 0 */
-	POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
+	POWER_SWITCH_PIN = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
   /* USER CODE END EXTI1_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(PowerSwitch_Pin);
   /* USER CODE BEGIN EXTI1_IRQn 1 */
@@ -249,14 +250,7 @@ void CAN1_RX0_IRQHandler(void)
 void EXTI15_10_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
-	if (POWER_STATE == 0) {
-		if (HAL_GPIO_ReadPin(PokRESET_GPIO_Port, PokRESET_Pin) == GPIO_PIN_SET) {
-			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_SET);
-		}
-		else {
-			HAL_GPIO_WritePin(StatusSignal_GPIO_Port, StatusSignal_Pin, GPIO_PIN_RESET);
-		}
-	}
+	POWER_OKAY = HAL_GPIO_ReadPin(PokRESET_GPIO_Port, PokRESET_Pin);
   /* USER CODE END EXTI15_10_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(PokRESET_Pin);
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */

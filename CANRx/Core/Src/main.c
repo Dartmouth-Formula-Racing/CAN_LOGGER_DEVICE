@@ -101,8 +101,9 @@ DIR dir;		//Directory
 FILINFO fno;	// File Info
 const char *data_directory = "/CAN_DATA";
 
-uint8_t POWER_STATE;
+uint8_t POWER_SWITCH_PIN;
 uint8_t NEW_LOG_FLAG;
+uint8_t POWER_OKAY;
 char data_buffer[NUM_BUFFERS][BUFFER_TOTAL_SIZE + 1]; // plus one for \00
 uint16_t buffer_fill_level[NUM_BUFFERS];
 uint8_t buffer_writing_to;
@@ -261,8 +262,10 @@ int main(void)
 		 * 	else (power switch is set to off) -> POWER_OFF
 		 */
 		case TURN_ON:
-			POWER_STATE = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
-			state = POWER_STATE ? PERIPHERAL_INIT : POWER_OFF;
+			HAL_GPIO_WritePin(PokManualReset_GPIO_Port, PokManualReset_Pin, GPIO_PIN_SET);
+			POWER_SWITCH_PIN = HAL_GPIO_ReadPin(PowerSwitch_GPIO_Port, PowerSwitch_Pin);
+			POWER_OKAY = HAL_GPIO_ReadPin(PokRESET_GPIO_Port, PokRESET_Pin);
+			state = POWER_SWITCH_PIN ? PERIPHERAL_INIT : POWER_OFF;
 			NEW_LOG_FLAG = 0;
 			break;
 
@@ -371,7 +374,7 @@ int main(void)
 		 * 	Else -> STANDBY
 		 */
 		case STANDBY:
-			if (!POWER_STATE || NEW_LOG_FLAG) //Power switch is off or new log file
+			 if (!POWER_OKAY || !POWER_SWITCH_PIN || NEW_LOG_FLAG) //Power switch is off or new log file
 				state = RESET_STATE;
 			else if (buffer_fill_level[buffer_reading_from] == CAN_MESSAGES_PER_BUFFER) //Buffer is filled
 				state = SD_CARD_WRITE;
@@ -470,10 +473,10 @@ int main(void)
 			buffer_fill_level[buffer_reading_from] = 0;
 			buffer_reading_from = (buffer_reading_from + 1) % NUM_BUFFERS;
 
-//			printf("------------------------------------------\r\n");
-//			for (int buff_num = 0; buff_num < NUM_BUFFERS; buff_num++) {
-//				printf("Buffer[%d]: %d\r\n", buff_num, buffer_fill_level[buff_num]);
-//			}
+			printf("------------------------------------------\r\n");
+			for (int buff_num = 0; buff_num < NUM_BUFFERS; buff_num++) {
+				printf("Buffer[%d]: %d\r\n", buff_num, buffer_fill_level[buff_num]);
+			}
 
 			if (CAN_notifications_deactivated) {
 #ifdef VERBOSE_DEBUGGING
@@ -529,15 +532,16 @@ int main(void)
 
 			f_close(&SDFile);
 			f_mount(0, (TCHAR const*) NULL, 0);
+			state = TURN_ON; // button was pressed
 
-			if (!POWER_STATE) {
+			if (!POWER_OKAY || !POWER_SWITCH_PIN) {
 				state = POWER_OFF;
 #ifdef VERBOSE_DEBUGGING
 				printf("Turning off!\r\n");
 #endif
+
 			}
 
-			state = TURN_ON; // button was pressed
 			break;
 
 		/**
@@ -553,7 +557,10 @@ int main(void)
 		 *	Else -> POWER_OFF
 		 */
 		case POWER_OFF:
-			if (POWER_STATE) {
+			if (!POWER_OKAY){
+				break;
+			}
+			if (POWER_SWITCH_PIN) {
 				state = TURN_ON;
 
 #ifdef VERBOSE_DEBUGGING
