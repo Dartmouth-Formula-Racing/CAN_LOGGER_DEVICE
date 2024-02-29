@@ -89,7 +89,7 @@ static CANRX_ERROR_T CREATE_NEW_LOG(void);
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #define ENCODED_CAN_SIZE_BYTES 37
 #define CAN_MESSAGES_PER_BUFFER 512
-#define NUM_BUFFERS 16
+#define NUM_BUFFERS 8
 #define BUFFER_TOTAL_SIZE ENCODED_CAN_SIZE_BYTES*CAN_MESSAGES_PER_BUFFER
 #define FILENAME_MAX_BYTES 256
 /* USER CODE END PFP */
@@ -425,7 +425,7 @@ int main(void)
 
 			}
 
-			if ((fresult_rc = f_sync(&SDFile)) != FR_OK) {
+			if (buffer_reading_from == NUM_BUFFERS - 1 && (fresult_rc = f_sync(&SDFile)) != FR_OK) {
 #ifdef VERBOSE_DEBUGGING
 				printf("Sync Failed with rc = %d!\r\n", fresult_rc);
 #endif
