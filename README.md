@@ -34,7 +34,7 @@ The logger is designed to be used in tandem with a PCB shield, a schematic can b
 
 **Example:** 2024-03-11T01:49:48Z.log 
 
-**Raw CAN Data Format:** epochTimestamp#CANExtendedIdentifier#8bitDataPacket
+**Raw CAN Data Format:** millisSinceLogCreated#CANExtendedIdentifier#8bitDataPacket
 
 **Example:**
 ```
